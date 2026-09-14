@@ -26,3 +26,4 @@ Não repita migrações já aplicadas. A publicação aplica as migrações de p
 ## Verificação realizada
 
 Compilação e TypeScript sem erros. Testes locais de cadastro, relacionamentos, edição pela interface, cálculo dos valores, limite de medição (incluindo requisições simultâneas), preservação do preço após medição, importação e recuperação de PDF, download, exclusão de documento, autenticação e origem de requisições. Navegação verificada em desktop e celular, além das ferramentas WebMCP de consulta e abertura da obra.
+`nLimite de importação: 25 MB por arquivo. Projetos CAD são disponibilizados para download e abertura em software compatível.
