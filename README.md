@@ -5,6 +5,7 @@ Sistema em português para cadastro e acompanhamento de obras de engenharia.
 - Obras: cliente, endereço, responsável, prazos, situação, orçamento e observações.
 - Engenheiros: identificação profissional, registro, especialidade e contato.
 - Equipes: líder, serviço, integrantes e obra vinculada.
+- Tipos de etapas: catálogo compartilhado, nome, descrição, cadastro e edição; nove tipos iniciais disponíveis para seleção.
 - Etapas por obra: nove etapas iniciais, cadastro e edição, empreiteira, valor contratado para 100% e período.
 - Medições: percentual acumulado (duas casas decimais), variação por período, avanço semanal, valor financeiro salvo, pagamento e histórico.
 - Documentos: importação de arquivos por obra e categoria, abertura, download e exclusão.
@@ -41,3 +42,5 @@ Pagamentos têm data e histórico de alterações. Somente a última medição p
 A migração aditiva 0001 deve ser aplicada apenas uma vez no banco local. As etapas iniciais são criadas pela aplicação, de forma idempotente, ao abrir os dados e ao cadastrar obras. Informe valores e empreiteiras antes de medir.
 
 Teste de integração das regras com SQLite em memória: `node tests/measurements.mjs`.
+
+O catálogo de tipos é independente dos contratos. Selecionar um tipo preenche o nome da etapa; editar o catálogo não renomeia etapas existentes nem altera seus cálculos. A migração aditiva 0002 cria o catálogo e o vínculo opcional.

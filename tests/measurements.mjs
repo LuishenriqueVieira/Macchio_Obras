@@ -39,5 +39,16 @@ const final=await create('measurements',measure(100,first.id,'2026-09-03'));data
 await create('measurements',measure(100,final.id,'2026-09-04'),400);
 const {weekRange,normalizeMeasurements}=await import(helpers);assert.deepEqual(weekRange('2027-01-01'),{start:'2026-12-28',end:'2027-01-03'});
 const legacy=normalizeMeasurements([{id:'legacy',name:'Legado',quantity:10,price:25}],[{id:'a',stageId:'legacy',date:'2026-01-01',quantity:2,unitPrice:25},{id:'b',stageId:'legacy',date:'2026-01-02',quantity:3,unitPrice:25}]);assert.equal(legacy[1].endBp,5000);assert.equal(legacy[1].amountCents,7500);
+assert.equal(data.stageTypes.length,9);
+const customType=await create('stageTypes',{name:'Impermeabilização',description:'Proteção contra umidade'});
+await create('stageTypes',{name:'  impermeabilizacao  ',description:''},409);
+await create('stageTypes',{name:' ',description:''},400);
+await request('PATCH',{kind:'stageTypes',id:customType.id,data:{name:'Impermeabilização de laje',description:'Manta e proteção mecânica'}});
+const customStage=await create('stages',{projectId:project.id,stageTypeId:customType.id,name:'Laje de cobertura',contractValue:800,contractor:'Empreiteira A',start:'2026-09-01',end:'2026-09-30'});
+await create('stages',{projectId:project.id,stageTypeId:'inexistente',name:'Inválida',contractValue:800,contractor:'A',start:'2026-09-01',end:'2026-09-30'},400);
+await request('PATCH',{kind:'stageTypes',id:'default-type-0',data:{name:'FUNDAÇÃO ESPECIAL',description:'Fundação adaptada'}});
+await request('POST',{action:'initialize'});
+data=await request('GET');assert.equal(data.stageTypes.length,10);assert.equal(data.stageTypes.find(t=>t.id==='default-type-0').name,'FUNDAÇÃO ESPECIAL');assert.equal(data.stages.find(s=>s.id===customStage.id).stageTypeId,customType.id);assert.equal(data.measurements.find(m=>m.id===first.id).amountCents,30000);assert.equal(data.stages.filter(s=>s.name==='FUNDAÇÃO').length,1);
+console.log('PASS: catálogo persistente, nove tipos iniciais, edição, unicidade por nome, vínculo com etapas, inicialização sem sobrescrita e preservação financeira.');
 console.log('PASS: nove etapas, inicialização idempotente, percentuais, períodos, cálculo em centavos, repetição segura, proteção do contrato, pagamentos, histórico, concorrência por revisão, cancelamento, conclusão em 100%, semana e compatibilidade com medições antigas.');
 sql.close();

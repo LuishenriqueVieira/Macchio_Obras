@@ -1,11 +1,11 @@
 "use client";
 import {amountCents} from '@/lib/measurement';
-import {Building2,LayoutDashboard,Ruler,FolderOpen,HardHat,Users,TrendingUp} from 'lucide-react';
+import {Building2,LayoutDashboard,Ruler,FolderOpen,HardHat,Users,TrendingUp,Layers} from 'lucide-react';
 import {Sidebar,SidebarContent,SidebarHeader,SidebarFooter,useSidebar} from '@/components/ui/sidebar';
 import {Select,SelectTrigger,SelectValue,SelectContent,SelectItem} from '@/components/ui/select';
 import {Empty,EmptyHeader,EmptyTitle,EmptyDescription,EmptyMedia} from '@/components/ui/empty';
 import {money,type Row} from '@/lib/obras';
-export const nav=[['overview','Visão geral',LayoutDashboard],['projects','Obras',Building2],['stages','Etapas',Ruler],['measurements','Medições',Ruler],['documents','Documentos',FolderOpen],['engineers','Engenheiros',HardHat],['teams','Equipes',Users]] as const;
+export const nav=[['overview','Visão geral',LayoutDashboard],['projects','Obras',Building2],['stages','Etapas por obra',Ruler],['stageTypes','Tipos de etapas',Layers],['measurements','Medições',Ruler],['documents','Documentos',FolderOpen],['engineers','Engenheiros',HardHat],['teams','Equipes',Users]] as const;
 export function Choice({value,onChange,options,label}:any){return <Select value={value||'_none'} onValueChange={v=>onChange(v==='_none'?'':v)}><SelectTrigger className="choice" aria-label={label}><SelectValue placeholder={label}/></SelectTrigger><SelectContent>{options.map((o:any)=>typeof o==='string'?<SelectItem key={o} value={o}>{o}</SelectItem>:<SelectItem key={o[0]} value={o[0]||'_none'}>{o[1]}</SelectItem>)}</SelectContent></Select>}
 export function Status({value}:any){const colors:Record<string,string>={'Em andamento':'green',Planejamento:'blue',Pausada:'orange',Concluída:'gray'};return <span className={'status '+(colors[value]||'gray')}>{value}</span>}
 export function Blank({title,description,icon:Icon=FolderOpen,action}:any){return <Empty className="empty-state"><EmptyHeader><EmptyMedia><Icon size={34}/></EmptyMedia><EmptyTitle>{title}</EmptyTitle><EmptyDescription>{description}</EmptyDescription></EmptyHeader>{action}</Empty>}

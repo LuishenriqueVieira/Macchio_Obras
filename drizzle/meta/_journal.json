@@ -15,6 +15,13 @@
       "when": 1789490744685,
       "tag": "0001_oval_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789494478357,
+      "tag": "0002_late_exiles",
+      "breakpoints": true
     }
   ]
 }
