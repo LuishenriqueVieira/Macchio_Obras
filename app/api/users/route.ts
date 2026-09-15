@@ -13,14 +13,14 @@ export async function GET(request:Request){try{
 export async function POST(request:Request){try{
  const admin=await requireUser(request,'users.manage'),body:any=await request.json(),db=database(),now=new Date().toISOString();
  if(body.action==='password'){
-  if(typeof body.id!=='string'||!validPassword(body.password))return invalid('Use uma senha entre 12 e 128 caracteres.');
+  if(typeof body.id!=='string'||!validPassword(body.password))return invalid('Use uma senha somente numérica, com no máximo 8 dígitos.');
   const old:any=await db.prepare('SELECT * FROM appUsers WHERE id=?').bind(body.id).first();if(!old)return invalid('Usuário não encontrado.',404);
   if(old.id==='owner'||old.id===admin.id)return invalid('Para sua própria conta, use Minha senha. A senha do administrador principal só pode ser alterada por ele.',403);
   const hash=await hashPassword(body.password),result=await db.batch([db.prepare('UPDATE appUsers SET passwordHash=?,authVersion=authVersion+1,activationHash=NULL,activationExpiresAt=NULL,updatedAt=?,revision=revision+1 WHERE id=? AND revision=? RETURNING id').bind(hash,now,old.id,old.revision),db.prepare('INSERT INTO userAudit(id,userId,actorId,action,createdAt) SELECT ?,?,?,?,? WHERE changes()>0').bind(crypto.randomUUID(),old.id,admin.id,'Senha redefinida pelo administrador',now)]);
   if(!result[0].results.length)return invalid('O cadastro mudou. Atualize os dados.',409);return Response.json({ok:true},{headers:safeHeaders});
  }
  if(body.action)return invalid('Ação inválida.');
- const parsed=schema.safeParse(body.data);if(!parsed.success)return invalid('Confira nome, e-mail, usuário, perfil e permissões.');if(!validPassword(body.data.password))return invalid('Use uma senha entre 12 e 128 caracteres.');
+ const parsed=schema.safeParse(body.data);if(!parsed.success)return invalid('Confira nome, e-mail, usuário, perfil e permissões.');if(!validPassword(body.data.password))return invalid('Use uma senha somente numérica, com no máximo 8 dígitos.');
  const d=parsed.data,id=crypto.randomUUID(),hash=await hashPassword(body.data.password),permissions=expandPermissions(d.role==='admin'?presets.admin:d.permissions);
  const result=await db.batch([db.prepare('INSERT OR IGNORE INTO appUsers(id,username,passwordHash,name,email,role,active,permissions,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?) RETURNING id').bind(id,d.username,hash,d.name,d.email,d.role,d.active?1:0,JSON.stringify(permissions),now,now),db.prepare('INSERT INTO userAudit(id,userId,actorId,action,createdAt) SELECT ?,?,?,?,? WHERE changes()>0').bind(crypto.randomUUID(),id,admin.id,'Usuário cadastrado',now)]);
  if(!result[0].results.length)return invalid('Já existe um cadastro com esse usuário ou e-mail.',409);return Response.json({id},{status:201,headers:safeHeaders});

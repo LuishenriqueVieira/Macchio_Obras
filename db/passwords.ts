@@ -2,7 +2,7 @@ import {scrypt,randomBytes,timingSafeEqual} from 'node:crypto';
 import {Buffer} from 'node:buffer';
 import {database} from './access';
 const options={N:32768,r:8,p:3,maxmem:64*1024*1024};
-export const validPassword=(value:unknown):value is string=>typeof value==='string'&&value.length>=12&&value.length<=128;
+export const validPassword=(value:unknown):value is string=>typeof value==='string'&&/^[0-9]{1,8}$/.test(value);
 export const normalizeUsername=(value:string)=>value.trim().toLowerCase();
 export const validUsername=(value:string)=>/^[a-z0-9][a-z0-9._@+-]{2,253}$/.test(value);
 function derive(password:string,salt:Buffer){return new Promise<Buffer>((resolve,reject)=>scrypt(password,salt,32,options,(error,key)=>error?reject(error):resolve(key)))}

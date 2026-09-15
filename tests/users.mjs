@@ -13,8 +13,9 @@ const passwords=url(compile('db/passwords.ts').replace("'./access'",JSON.stringi
 const users=url(compile('db/users.ts').replace("'./access'",JSON.stringify(access)).replace("'./passwords'",JSON.stringify(passwords)).replace("'@/lib/permissions'",JSON.stringify(permissions)));
 function route(path){return import(url(compile(path).replace("'zod'",JSON.stringify(import.meta.resolve('zod'))).replace("'cloudflare:workers'",JSON.stringify(url('export const env={};'))).replace("'@/db/access'",JSON.stringify(access)).replace("'@/db/users'",JSON.stringify(users)).replace("'@/db/passwords'",JSON.stringify(passwords)).replace("'@/lib/permissions'",JSON.stringify(permissions)).replace("'@/lib/measurement'",JSON.stringify(url(compile('lib/measurement.ts'))))))}
 const api=await route('app/api/users/route.ts'),auth=await route('app/api/auth/route.ts'),data=await route('app/api/data/route.ts'),docs=await route('app/api/documents/route.ts');
-const {presets,expandPermissions}=await import(permissions),{tokenHash}=await import(passwords),cookies={};
-const pass='Local teste forte 2026!',next='Outra senha teste 2026!';
+const {presets,expandPermissions}=await import(permissions),{tokenHash,hashPassword,validPassword}=await import(passwords),cookies={};
+const pass='01234567',next='87654321';
+assert.ok(validPassword('0'));assert.ok(validPassword(pass));for(const invalid of ['', '123456789', '1234a678', '1234 678', '１２３４', 12345678])assert.equal(validPassword(invalid),false);
 async function req(target,method,who,body,status=200,extra={}){const headers={'Content-Type':'application/json',...extra};if(who&&cookies[who])headers.Cookie=cookies[who];const r=await target[method](new Request('https://localhost/api/'+(target===api?'users':target===auth?'auth':'data'),{method,headers,...(body?{body:JSON.stringify(body)}:{})}));const text=await r.text();assert.equal(r.status,status,text.slice(0,300));if(r.headers.has('Set-Cookie')&&who){const c=r.headers.get('Set-Cookie');assert.match(c,/HttpOnly/);assert.match(c,/Secure/);assert.match(c,/SameSite=Lax/);cookies[who]=c.split(';')[0]}try{return JSON.parse(text)}catch{return text}}
 const login=(who,username,password=pass,status=200)=>req(auth,'POST',who,{action:'login',username,password},status);
 assert.equal((await req(api,'GET')).user,null);await req(data,'GET',null,null,401);for(const m of ['GET','POST','DELETE'])await req(docs,m,null,m==='GET'?null:{},401);
@@ -22,6 +23,7 @@ await req(auth,'POST',null,{action:'setup-owner',username:'owner',password:pass}
 sql.prepare('INSERT INTO appUsers(id,identityId,name,email,role,permissions,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)').run('owner','owner-stable-id','Principal','owner@example.com','admin',JSON.stringify(presets.admin),'2000-01-01','2000-01-01');
 assert.ok((await req(api,'GET',null,null,200,{'oai-authenticated-user-id':'owner-stable-id'})).setup);
 await req(auth,'POST',null,{action:'setup-owner',username:'owner',password:pass},403,{'oai-authenticated-user-id':'wrong'});
+for(const password of ['123456789','1234a678',''])await req(auth,'POST',null,{action:'setup-owner',username:'owner',password},400,{'oai-authenticated-user-id':'owner-stable-id'});
 await req(auth,'POST','owner',{action:'setup-owner',username:'owner',password:pass},200,{'oai-authenticated-user-id':'owner-stable-id'});
 await req(auth,'POST',null,{action:'setup-owner',username:'owner',password:next},403,{'oai-authenticated-user-id':'owner-stable-id'});
 await req(data,'GET',null,null,401,{'oai-authenticated-user-id':'owner-stable-id'});
@@ -32,6 +34,7 @@ const storedSession=sql.prepare('SELECT id FROM authSessions WHERE userId=?').ge
 const person={name:'Leitor',email:'reader@example.com',username:'leitor',password:pass,role:'custom',active:true,permissions:['stageTypes.view']};
 await req(api,'POST',null,{data:person},401);const created=await req(api,'POST','owner',{data:person},201);await req(api,'POST','owner',{data:person},409);
 await req(api,'POST','owner',{data:{...person,email:'other@example.com',username:'other',password:'short'}},400);
+for(const password of ['123456789','1234a678',''])await req(api,'POST','owner',{data:{...person,email:'invalid@example.com',username:'invalid',password}},400);
 const list=await req(api,'GET','owner');assert.equal(list.users.length,2);assert.ok(!JSON.stringify(list).includes('passwordHash'));assert.ok(!JSON.stringify(list).includes('activationHash'));assert.ok(!JSON.stringify(list).includes(pass));
 await login('reader','leitor');assert.equal((await req(api,'GET','reader')).users.length,0);
 await req(data,'POST','owner',{action:'initialize'});const filtered=await req(data,'GET','reader');assert.equal(filtered.stageTypes.length,9);assert.deepEqual(filtered.projects,[]);assert.deepEqual(filtered.measurements,[]);
@@ -44,6 +47,7 @@ await req(api,'PATCH','owner',{id:reader.id,revision:reader.revision,data:{...pe
 reader=(await req(api,'GET','owner')).users.find(u=>u.id===created.id);await req(api,'PATCH','owner',{id:reader.id,revision:reader.revision,data:{...person,active:true,permissions:['stageTypes.edit']}});
 await req(data,'GET','reader',null,401);await login('reader','leitor');await req(data,'POST','reader',{kind:'stageTypes',data:{name:'Tipo permitido',description:''}},201);await req(api,'PATCH','owner',{id:reader.id,revision:reader.revision,data:person},409);
 const owner=(await req(api,'GET','owner')).user;await req(api,'PATCH','owner',{id:'owner',revision:owner.revision,data:{...owner,active:false}},403);await req(api,'PATCH','owner',{id:'owner',revision:owner.revision,data:{...owner,role:'viewer',permissions:presets.viewer}},403);await req(api,'POST','owner',{action:'password',id:'owner',password:next},403);
+for(const password of ['123456789','1234a678','']){await req(api,'POST','owner',{action:'password',id:reader.id,password},400);await req(auth,'POST','owner',{action:'change-password',currentPassword:pass,password},400)}
 await req(api,'POST','owner',{action:'password',id:reader.id,password:next});await req(data,'GET','reader',null,401);await login(null,'leitor',pass,401);await login('reader','leitor',next);
 await req(auth,'POST','owner',{action:'change-password',currentPassword:'wrong',password:next},400);await req(auth,'POST','owner',{action:'change-password',currentPassword:pass,password:next});await req(data,'GET','owner2',null,401);await req(data,'GET','owner');await login(null,'owner',pass,401);await login('owner2','owner',next);
 await req(auth,'POST','reader',{action:'logout'});await req(data,'GET','reader',null,401);
@@ -51,8 +55,10 @@ await req(api,'POST',null,{action:'activate',token:'legacy'},401);await req(api,
 // Legacy login names must also participate in the unique index.
 sql.prepare('INSERT INTO appUsers(id,name,email,role,createdAt,updatedAt) VALUES(?,?,?,?,?,?)').run('legacy','Antigo','legacy@example.com','viewer','2000-01-01','2000-01-01');
 await req(api,'POST','owner',{data:{...person,email:'new@example.com',username:'legacy@example.com'}},409);
+// Previously configured passwords remain usable until the user changes them.
+const legacyPassword='Senha anterior de teste!';sql.prepare('UPDATE appUsers SET passwordHash=? WHERE id=?').run(await hashPassword(legacyPassword),'legacy');await login('legacy-user','legacy@example.com',legacyPassword);await req(auth,'POST','legacy-user',{action:'change-password',currentPassword:legacyPassword,password:'00000001'});await login('legacy-user','legacy@example.com','00000001');
 // No account age or password expiry, even with very old creation timestamps.
 sql.prepare('UPDATE appUsers SET createdAt=? WHERE id=?').run('1900-01-01','owner');sql.exec('DELETE FROM loginThrottle');await login('old-account','owner',next);
 for(let i=0;i<10;i++)await login(null,'attempts',pass,401);await login(null,'attempts',pass,429);
-assert.equal(sql.prepare('SELECT COUNT(*) count FROM userAudit').get().count,6);assert.ok(expandPermissions(['payments.edit']).includes('projects.view'));
+assert.equal(sql.prepare('SELECT COUNT(*) count FROM userAudit').get().count,7);assert.ok(expandPermissions(['payments.edit']).includes('projects.view'));
 console.log('PASS: primeira senha restrita ao titular; login sem ChatGPT; cookies e hashes; conta sem expiração; privilégios e documentos; bloqueio de sessões por desativação e senha; reativação sem reviver sessões; logout; duplicidade; CSRF; limitação de tentativas; proteção do administrador; auditoria.');sql.close();
