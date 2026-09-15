@@ -10,11 +10,11 @@ Sistema em português para cadastro e acompanhamento de obras de engenharia.
 - Medições: percentual acumulado (duas casas decimais), variação por período, avanço semanal, valor financeiro salvo, pagamento e histórico.
 - Documentos: importação de arquivos por obra e categoria, abertura, download e exclusão.
 
-Os dados demonstrativos são fictícios e não são gravados no banco. Os cadastros reais são persistidos no D1; os documentos ficam no R2. O acesso ao sistema publicado é privado e utiliza a autenticação da plataforma Sites. Valor medido não equivale a valor pago. Arquivos importados são armazenados; não há extração automática de conteúdo nem interpretação de projetos CAD.
+Os dados demonstrativos são fictícios e não são gravados no banco. Os cadastros reais são persistidos no D1; os documentos ficam no R2. A página de entrada é pública; dados e documentos exigem login com usuário e senha e as permissões do cadastro. Valor medido não equivale a valor pago. Arquivos importados são armazenados; não há extração automática de conteúdo nem interpretação de projetos CAD.
 
 ## Execução
 
-Node.js 22.13 ou superior. Instale as dependências com `npm run install:ci`, execute a prévia com `npm run dev` e compile com `npm run build`. Em desenvolvimento, entre pelo caminho `/signin-with-chatgpt?return_to=%2F` para ativar a sessão local de teste.
+Node.js 22.13 ou superior. Instale as dependências com `npm run install:ci`, execute a prévia com `npm run dev` e compile com `npm run build`. Os testes de autenticação usam contas fictícias em SQLite na memória e não alteram o banco publicado.
 
 A estrutura é definida em `db/schema.ts` e as migrações ficam em `drizzle/`. Para preparar o banco local, após compilar, execute a migração pendente com Wrangler:
 
@@ -49,8 +49,14 @@ O catálogo de tipos é independente dos contratos. Selecionar um tipo preenche 
 
 A aba Usuários e permissões oferece perfis Administrador, Engenheiro, Consulta e Personalizado. Privilégios de consulta e alteração são validados nas APIs e refletidos nos menus e botões. Pagamentos, cancelamento de medições, exclusão de documentos e administração de usuários têm permissões próprias. As permissões se aplicam a todas as obras.
 
-O acesso combina o compartilhamento privado do Sites com o vínculo à identidade estável da conta ChatGPT. E-mail é contato; após a ativação, a autorização usa o ID autenticado. O administrador gera um link de ativação com token aleatório, armazenado apenas como SHA-256, válido por sete dias e utilizável uma vez. Novos links invalidam anteriores. Compartilhe o site com o destinatário antes de entregar seu link. Desativação é conferida a cada requisição.
+O administrador cadastra nome, e-mail de contato, usuário, senha inicial, perfil e situação. Não há expiração do cadastro, da senha nem links de ativação. As contas permanecem disponíveis até serem desativadas. A interface oferece Minha senha, Sair e redefinição de senha de outros usuários pelo administrador. A senha do administrador principal só pode ser alterada por ele, mediante a senha atual.
 
-A configuração inicial exige a conta destinatária e o segredo de uso único definido por OWNER_SETUP_TOKEN e OWNER_SETUP_EMAIL no ambiente do Sites. O administrador principal não pode ser desativado ou perder seu perfil. Usuários desconhecidos nunca se tornam administradores automaticamente. O histórico de alterações administrativas é armazenado em userAudit.
+A primeira senha do administrador já vinculado é definida pelo próprio titular, autenticado com a identidade estável anteriormente registrada. Essa confirmação de migração só funciona enquanto a senha estiver ausente. Depois disso, o acesso normal exige usuário e senha, sem ChatGPT. Usuários desconhecidos nunca se tornam administradores automaticamente. O administrador principal permanece ativo e com acesso completo.
 
-A migração 0003 adiciona usuários e auditoria sem alterar os registros das obras. Validação: `node tests/users.mjs`, `node tests/measurements.mjs` e TypeScript.
+Senhas usam scrypt (N=32768, r=8, p=3), sal aleatório de 16 bytes e comparação em tempo constante. Referências: [OWASP Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html) e [Cloudflare node:crypto](https://developers.cloudflare.com/workers/runtime-apis/nodejs/crypto/). Sessões usam tokens aleatórios de 32 bytes e apenas seus hashes SHA-256 são armazenados. Cookies HttpOnly, Secure em HTTPS e SameSite=Lax são renovados por até 400 dias, conforme os limites dos navegadores. O usuário poderá precisar entrar novamente se limpar os cookies ou trocar de navegador; isso não expira sua conta.
+
+Cada requisição valida a situação, as permissões e a versão da autenticação. Desativar, redefinir ou alterar a senha invalida as sessões anteriores. Reativar não restaura sessões antigas. Sair revoga a sessão atual. Há limitação de tentativas por usuário e IP, e bloqueio de requisições de alteração vindas de outra origem. O histórico administrativo fica em userAudit. Não há auto-cadastro público nem recuperação automática por e-mail; redefinições são administradas no sistema.
+
+A migração aditiva 0004 cria sessões, limitação de tentativas e os campos de login, preservando obras e contas existentes. As colunas antigas de ativação ficam sem uso para preservar o histórico de migrações. Nenhuma senha ou conta é incluída em migrações.
+
+Validação: `node tests/users.mjs`, `node tests/measurements.mjs`, TypeScript, compilação e autenticação no Worker local.
