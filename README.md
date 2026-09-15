@@ -44,3 +44,13 @@ A migração aditiva 0001 deve ser aplicada apenas uma vez no banco local. As et
 Teste de integração das regras com SQLite em memória: `node tests/measurements.mjs`.
 
 O catálogo de tipos é independente dos contratos. Selecionar um tipo preenche o nome da etapa; editar o catálogo não renomeia etapas existentes nem altera seus cálculos. A migração aditiva 0002 cria o catálogo e o vínculo opcional.
+
+## Usuários e permissões
+
+A aba Usuários e permissões oferece perfis Administrador, Engenheiro, Consulta e Personalizado. Privilégios de consulta e alteração são validados nas APIs e refletidos nos menus e botões. Pagamentos, cancelamento de medições, exclusão de documentos e administração de usuários têm permissões próprias. As permissões se aplicam a todas as obras.
+
+O acesso combina o compartilhamento privado do Sites com o vínculo à identidade estável da conta ChatGPT. E-mail é contato; após a ativação, a autorização usa o ID autenticado. O administrador gera um link de ativação com token aleatório, armazenado apenas como SHA-256, válido por sete dias e utilizável uma vez. Novos links invalidam anteriores. Compartilhe o site com o destinatário antes de entregar seu link. Desativação é conferida a cada requisição.
+
+A configuração inicial exige a conta destinatária e o segredo de uso único definido por OWNER_SETUP_TOKEN e OWNER_SETUP_EMAIL no ambiente do Sites. O administrador principal não pode ser desativado ou perder seu perfil. Usuários desconhecidos nunca se tornam administradores automaticamente. O histórico de alterações administrativas é armazenado em userAudit.
+
+A migração 0003 adiciona usuários e auditoria sem alterar os registros das obras. Validação: `node tests/users.mjs`, `node tests/measurements.mjs` e TypeScript.

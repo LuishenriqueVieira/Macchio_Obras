@@ -10,7 +10,9 @@ const url=code=>'data:text/javascript;base64,'+Buffer.from(code).toString('base6
 const transpile=path=>ts.transpileModule(fs.readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const helpers=url(transpile('lib/measurement.ts'));
 const mock=url(`export const authorize=()=>{};export const database=()=>globalThis.testDb;export const invalid=(error,status=400)=>Response.json({error},{status});export const failure=e=>{console.error(e);return Response.json({error:String(e)},{status:503})}`);
-const api=await import(url(transpile('app/api/data/route.ts').replace("'zod'",JSON.stringify(import.meta.resolve('zod'))).replace("'@/db/access'",JSON.stringify(mock)).replace("'@/lib/measurement'",JSON.stringify(helpers))));
+const permissionHelpers=url(transpile('lib/permissions.ts'));
+const userMock=url("export const requireUser=async()=>({id:'test-admin',active:true,role:'admin',permissions:[]})");
+const api=await import(url(transpile('app/api/data/route.ts').replace("'zod'",JSON.stringify(import.meta.resolve('zod'))).replace("'@/db/access'",JSON.stringify(mock)).replace("'@/lib/measurement'",JSON.stringify(helpers)).replace("'@/lib/permissions'",JSON.stringify(permissionHelpers)).replace("'@/db/users'",JSON.stringify(userMock))));
 async function request(method,body,status=200){const r=await api[method](new Request('http://localhost/api/data',{method,headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}));const d=await r.json();assert.equal(r.status,status,JSON.stringify(d));return d}
 const create=(kind,data,status=201)=>request('POST',{kind,data},status);
 const project=await create('projects',{name:'Obra teste',client:'Cliente',address:'Local',engineerId:null,start:'2026-01-01',end:'2026-12-31',budget:1000,status:'Em andamento',notes:''});

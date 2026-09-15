@@ -1,3 +1,5 @@
+import {requireUser} from '@/db/users';
+import {hasPermission} from '@/lib/permissions';
 import {z} from 'zod';
 import {authorize,database,failure,invalid} from '@/db/access';
 import {initialStages,normalizeMeasurements,stageLedger,contractCents,amountCents,calculateCents} from '@/lib/measurement';
@@ -20,11 +22,12 @@ async function initialize(db:ReturnType<typeof database>){
  const works=await db.prepare('SELECT * FROM projects WHERE stagesInitialized=0').all<any>();
  for(const p of works.results){await db.batch([...defaults.map(t=>db.prepare(`INSERT INTO stages(id,projectId,name,stageTypeId,unit,quantity,price,start,end,contractCents,contractor) SELECT ?,id,?,?,'%',100,0,start,end,0,'' FROM projects WHERE id=? AND stagesInitialized=0 AND NOT EXISTS(SELECT 1 FROM stages WHERE projectId=? AND name=? COLLATE NOCASE)`).bind(crypto.randomUUID(),t.name,t.id,p.id,p.id,t.name)),db.prepare('UPDATE projects SET stagesInitialized=1 WHERE id=?').bind(p.id)])}
 }
-export async function GET(request:Request){try{authorize(request);const db=database();const lists=await db.batch([...kinds,'documents'].map(k=>db.prepare(`SELECT rowid AS sequence,* FROM ${k} ORDER BY rowid DESC`)));const data:any=Object.fromEntries([...kinds,'documents'].map((k,i)=>[k,lists[i].results]));data.measurements=normalizeMeasurements(data.stages,data.measurements);return Response.json(data,{headers:{'Cache-Control':'no-store'}})}catch(e){return failure(e)}}
+export async function GET(request:Request){try{const user=await requireUser(request);const db=database(),all=[...kinds,'documents'],allowed=all.filter(k=>hasPermission(user,k+'.view'));const lists=allowed.length?await db.batch(allowed.map(k=>db.prepare(`SELECT rowid AS sequence,* FROM ${k} ORDER BY rowid DESC`))):[];const data:any=Object.fromEntries(all.map(k=>[k,allowed.includes(k)?lists[allowed.indexOf(k)].results:[]]));data.measurements=normalizeMeasurements(data.stages,data.measurements);return Response.json(data,{headers:{'Cache-Control':'no-store'}})}catch(e){return failure(e)}}
 async function save(request:Request,editing:boolean){try{
- authorize(request);const body:any=await request.json(),db=database();
- if(body.action==='initialize'&&!editing){await initialize(db);return Response.json({ok:true})}
+ const user=await requireUser(request);const body:any=await request.json(),db=database();
+ if(body.action==='initialize'&&!editing){if(hasPermission(user,'projects.edit')||hasPermission(user,'stageTypes.edit'))await initialize(db);return Response.json({ok:true})}
  if(body.action==='payment'&&editing){
+  await requireUser(request,'payments.edit');
   const parsed=z.object({id:req,paid:z.boolean(),paidAt:date.nullable(),revision:z.number().int().min(0)}).safeParse(body);if(!parsed.success)return invalid('Confira os dados do pagamento.');
   const d=parsed.data;if(d.paid&&!d.paidAt)return invalid('Informe a data do pagamento.');
   const m:any=await db.prepare('SELECT * FROM measurements WHERE id=?').bind(d.id).first();if(!m||m.cancelledAt)return invalid('Medição indisponível.');
@@ -34,6 +37,7 @@ async function save(request:Request,editing:boolean){try{
   if(!r.results.length)return invalid('Este lançamento foi atualizado. Recarregue os dados.',409);return Response.json({id:d.id});
  }
  const kind=body.kind as keyof typeof schemas;if(!kinds.includes(kind))return invalid('Cadastro inválido.');if(editing&&kind==='measurements')return invalid('Os cálculos salvos não podem ser editados. Cancele o último lançamento pendente para corrigir.');
+ await requireUser(request,kind+'.edit');
  const parsed=schemas[kind].safeParse(body.data);if(!parsed.success)return invalid(parsed.error.issues[0]?.message||'Confira os campos informados.');let d:any=parsed.data;
  const id=editing?req.parse(body.id):kind==='measurements'?d.requestId:crypto.randomUUID();
  if(editing&&!await db.prepare(`SELECT id FROM ${kind} WHERE id=?`).bind(id).first())return invalid('Cadastro não encontrado.',404);
@@ -63,4 +67,4 @@ async function save(request:Request,editing:boolean){try{
 }catch(e){return failure(e)}}
 export async function POST(r:Request){return save(r,false)}
 export async function PATCH(r:Request){return save(r,true)}
-export async function DELETE(request:Request){try{authorize(request);const {id}=await request.json() as any;if(typeof id!=='string')return invalid('Medição inválida.');const db=database();const r=await db.prepare(`UPDATE measurements SET cancelledAt=?,revision=revision+1 WHERE id=? AND paid=0 AND cancelledAt IS NULL AND id=(SELECT newer.id FROM measurements newer WHERE newer.stageId=measurements.stageId AND newer.cancelledAt IS NULL ORDER BY newer.date DESC,newer.rowid DESC LIMIT 1) RETURNING id`).bind(new Date().toISOString(),id).all();if(!r.results.length)return invalid('Somente a última medição pendente da etapa pode ser cancelada.');return Response.json({ok:true})}catch(e){return failure(e)}}
+export async function DELETE(request:Request){try{await requireUser(request,'measurements.cancel');const {id}=await request.json() as any;if(typeof id!=='string')return invalid('Medição inválida.');const db=database();const r=await db.prepare(`UPDATE measurements SET cancelledAt=?,revision=revision+1 WHERE id=? AND paid=0 AND cancelledAt IS NULL AND id=(SELECT newer.id FROM measurements newer WHERE newer.stageId=measurements.stageId AND newer.cancelledAt IS NULL ORDER BY newer.date DESC,newer.rowid DESC LIMIT 1) RETURNING id`).bind(new Date().toISOString(),id).all();if(!r.results.length)return invalid('Somente a última medição pendente da etapa pode ser cancelada.');return Response.json({ok:true})}catch(e){return failure(e)}}
