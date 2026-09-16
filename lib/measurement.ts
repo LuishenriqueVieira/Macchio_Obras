@@ -31,11 +31,28 @@ export function previewMeasurement(kind:string|undefined,contract:number,percent
  if(Math.abs(p*PERCENT_SCALE-Math.round(p*PERCENT_SCALE))>1e-6)return null;
  return calculateUnits(contract,Math.round(p*PERCENT_SCALE),already);
 }
-export function percentFromAmount(contract:number,amount:unknown,already:number):number|null{
+export function amountInputUnits(contract:number,amount:unknown,already:number):number|null{
  if(amount===''||amount==null||!Number.isSafeInteger(contract)||contract<=0||!Number.isSafeInteger(already)||already<0)return null;
  const value=Number(amount),units=Math.round(value*VALUE_SCALE);
  if(!Number.isFinite(value)||value<=0||Math.abs(value*VALUE_SCALE-units)>1e-6||!Number.isSafeInteger(units)||units+already>contract)return null;
+ return units;
+}
+export function percentFromAmount(contract:number,amount:unknown,already:number):number|null{
+ const units=amountInputUnits(contract,amount,already);if(units===null)return null;
  return Number((BigInt(units+already)*BigInt(PERCENT_TOTAL)+BigInt(Math.floor(contract/2)))/BigInt(contract))/PERCENT_SCALE;
+}
+export function resolveMeasurementInput(kind:string|undefined,mode:unknown,contract:number,percent:unknown,amount:unknown,already:number):{amountUnits:number;endP4:number}|null{
+ if(kind!=='measurements')return null;
+ if(mode==='amount'){
+  const units=amountInputUnits(contract,amount,already),derived=percentFromAmount(contract,amount,already);
+  if(units===null||derived===null)return null;
+  const endP4=Math.round(derived*PERCENT_SCALE);
+  if(endP4<=0||endP4>PERCENT_TOTAL)return null;
+  return {amountUnits:units,endP4};
+ }
+ const units=previewMeasurement(kind,contract,percent,already),p=Number(percent);
+ if(units===null||units<=0||!Number.isFinite(p))return null;
+ return {amountUnits:units,endP4:Math.round(p*PERCENT_SCALE)};
 }
 
 export const allocationNames=['MA3','ALEX','Pedreiro'] as const;

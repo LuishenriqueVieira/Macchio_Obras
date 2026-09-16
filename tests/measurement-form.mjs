@@ -20,6 +20,7 @@ const input=name=>nodes(render()).find(n=>n.type==='input'&&n.props.name===name)
 const payment={id:'m',stageId:'s',stageName:'Fundação',contractor:'Empreiteira',amountCents:20000,paid:true,paidAt:'2026-09-03',date:'2026-09-02'};
 const original=form;form=payment;assert.doesNotThrow(()=>render('payment',payment));form=original;
 assert.equal(input('measurementValue').props.value,'');
+let selected=0;input('percent').props.onFocus({currentTarget:{select(){selected++}}});input('measurementValue').props.onFocus({currentTarget:{select(){selected++}}});assert.equal(selected,2);
 input('percent').props.onChange({target:{value:'50'}});assert.equal(input('measurementValue').props.value,'200.0000');assert.equal(input('percent').props.step,'0.0001');assert.equal(input('measurementValue').props.step,'0.0001');
 input('measurementValue').props.onChange({target:{value:'150.00'}});assert.equal(form.percent,45);assert.equal(input('percent').props.value,45);
 input('percent').props.onChange({target:{value:''}});assert.equal(input('measurementValue').props.value,'');
@@ -37,12 +38,16 @@ assert.equal(h.percentFromAmount(0,100,0),null);assert.equal(h.percentFromAmount
 assert.equal(h.percentFromAmount(10000100,700.007,3000030),100);
 assert.equal(h.previewMeasurement('measurements',10000100,100,3000030),7000070);
 const rounded=h.percentFromAmount(123456700,12.34,0);assert.equal(rounded,0.1);assert.equal(h.previewMeasurement('measurements',123456700,rounded,0),123457);
+// When the user types an amount, it is authoritative even if its derived 4-decimal percentage would recompute a slightly different value.
+const screenshotCase=h.resolveMeasurementInput('measurements','amount',48000000,62.5033,1000,20001600);assert.deepEqual(screenshotCase,{amountUnits:10000000,endP4:625033});
+assert.equal(h.previewMeasurement('measurements',48000000,62.5033,20001600),9999984);
 console.log('PASS: payment dialog regression, dynamic amount/percentage inputs, previous balance, editing, clearing, bounds and rounding.');
 
 const {AllocationEditor}=await import(allocationModule);
 let drafts=h.allocationDrafts(null,10000001),total=10000001;
 const editor=()=>AllocationEditor({total,drafts,onChange:value=>drafts=value});
 const layerInput=name=>nodes(editor()).find(n=>n.type==='input'&&n.props.name===name);
+selected=0;layerInput('allocation-amount-0').props.onFocus({currentTarget:{select(){selected++}}});layerInput('allocation-percent-0').props.onFocus({currentTarget:{select(){selected++}}});assert.equal(selected,2);
 layerInput('allocation-amount-0').props.onChange({target:{value:'500.00'}});
 assert.equal(layerInput('allocation-percent-0').props.value,'50.0000');assert.equal(layerInput('allocation-amount-0').props.step,'0.0001');assert.equal(layerInput('allocation-percent-0').props.step,'0.0001');
 layerInput('allocation-percent-1').props.onChange({target:{value:'30'}});

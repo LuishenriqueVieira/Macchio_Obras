@@ -12,8 +12,8 @@ export function AllocationEditor({total,drafts,onChange,busy=false}:{total:numbe
    const draft=inputs[i]||{mode:'amount',input:'0.0000'},other=result.sum-(row.amountUnits||0),remaining=total-other;
    return <fieldset key={row.name} disabled={busy||total<=0} className={'allocation-card allocation-'+i}>
     <legend><span>{i+1}</span>{row.name}</legend>
-    <label>Valor (R$)<input aria-label={'Valor '+row.name} name={'allocation-amount-'+i} type="number" inputMode="decimal" min="0" max={Math.max(0,total/VALUE_SCALE)} step="0.0001" required value={draft.mode==='amount'?draft.input:row.amountUnits===null?'':(row.amountUnits/VALUE_SCALE).toFixed(4)} onChange={e=>change(i,'amount',e.target.value)}/></label>
-    <label>Parte da medição (%)<input aria-label={'Percentual '+row.name} name={'allocation-percent-'+i} type="number" inputMode="decimal" min="0" max="100" step="0.0001" required value={draft.mode==='percent'?draft.input:(row.percentP4/PERCENT_SCALE).toFixed(4)} onChange={e=>change(i,'percent',e.target.value)} onBlur={reconcile}/></label>
+    <label>Valor (R$)<input aria-label={'Valor '+row.name} name={'allocation-amount-'+i} type="number" inputMode="decimal" min="0" max={Math.max(0,total/VALUE_SCALE)} step="0.0001" required value={draft.mode==='amount'?draft.input:row.amountUnits===null?'':(row.amountUnits/VALUE_SCALE).toFixed(4)} onFocus={e=>e.currentTarget.select()} onChange={e=>change(i,'amount',e.target.value)}/></label>
+    <label>Parte da medição (%)<input aria-label={'Percentual '+row.name} name={'allocation-percent-'+i} type="number" inputMode="decimal" min="0" max="100" step="0.0001" required value={draft.mode==='percent'?draft.input:(row.percentP4/PERCENT_SCALE).toFixed(4)} onFocus={e=>e.currentTarget.select()} onChange={e=>change(i,'percent',e.target.value)} onBlur={reconcile}/></label>
     <button type="button" className="allocation-rest" disabled={remaining<0||remaining>total} onClick={()=>change(i,'amount',(remaining/VALUE_SCALE).toFixed(4))}>Completar saldo aqui</button>
    </fieldset>;
   })}</div>
