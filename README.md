@@ -37,6 +37,10 @@ Logo, ícone e projetos do portfólio foram obtidos no site oficial da Macchio. 
 
 Cada lançamento guarda o percentual anterior, o novo acumulado, a base contratada, a empreiteira e o valor em centavos. O valor corresponde ao total acumulado arredondado menos os valores anteriores, garantindo que 100% feche o contrato. Períodos da mesma etapa não podem se sobrepor. O filtro usa a data final da medição; não há rateio diário. O avanço geral é ponderado pelo valor contratado das etapas.
 
+Cada nova medição deve ser dividida em MA3, ALEX e Pedreiro. Os campos de valor e percentual de cada parcela são dinâmicos. O percentual da parcela tem como base o valor desta medição (as três fecham 100%); não representa o avanço acumulado da etapa. O servidor valida os três nomes, os valores inteiros em centavos e a soma exata. Percentuais exibidos e salvos são conciliados pelo método dos maiores restos para fechar 100%, incluindo contratos com centavos. O botão “Completar saldo aqui” atribui apenas o saldo ainda disponível à parcela escolhida.
+
+Alterar o total exige revisar a distribuição. A edição permitida mantém a distribuição anterior no histórico. Pagamento e cancelamento preservam as parcelas. Medições antigas mantêm distribuição não informada, sem atribuições automáticas; para informar a divisão, aplica-se a regra existente de edição da última medição pendente.
+
 Pagamentos têm data e histórico de alterações. Somente a última medição pendente pode ser cancelada; o registro permanece no histórico. O valor contratado fica bloqueado após o primeiro lançamento. As medições antigas são apresentadas em percentuais a partir de suas quantidades, preservando os valores financeiros anteriores.
 
 A migração aditiva 0001 deve ser aplicada apenas uma vez no banco local. As etapas iniciais são criadas pela aplicação, de forma idempotente, ao abrir os dados e ao cadastrar obras. Informe valores e empreiteiras antes de medir.

@@ -13,7 +13,7 @@ const mock=url(`export const authorize=()=>{};export const database=()=>globalTh
 const permissionHelpers=url(transpile('lib/permissions.ts'));
 const userMock=url("export const requireUser=async()=>({id:'test-admin',active:true,role:'admin',permissions:[]})");
 const api=await import(url(transpile('app/api/data/route.ts').replace("'zod'",JSON.stringify(import.meta.resolve('zod'))).replace("'@/db/access'",JSON.stringify(mock)).replace("'@/lib/measurement'",JSON.stringify(helpers)).replace("'@/lib/permissions'",JSON.stringify(permissionHelpers)).replace("'@/db/users'",JSON.stringify(userMock))));
-async function request(method,body,status=200){const r=await api[method](new Request('http://localhost/api/data',{method,headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}));const d=await r.json();assert.equal(r.status,status,JSON.stringify(d));return d}
+async function request(method,body,status=200){if(body?.kind==='measurements'&&body.data?.stageId&&body.data.allocations===undefined){const st=sql.prepare('SELECT * FROM stages WHERE id=?').get(body.data.stageId);if(st){const prior=sql.prepare('SELECT COALESCE(SUM(amountCents),0) AS amount FROM measurements WHERE stageId=? AND date<? AND cancelledAt IS NULL').get(st.id,body.data.periodStart||'');const amount=Math.max(0,Math.round((st.contractCents||0)*body.data.percent/100)-prior.amount);body={...body,data:{...body.data,allocations:[{name:'MA3',amountCents:amount},{name:'ALEX',amountCents:0},{name:'Pedreiro',amountCents:0}]}}}}const r=await api[method](new Request('http://localhost/api/data',{method,headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}));const d=await r.json();assert.equal(r.status,status,JSON.stringify(d));return d}
 const create=(kind,data,status=201)=>request('POST',{kind,data},status);
 const project=await create('projects',{name:'Obra teste',client:'Cliente',address:'Local',engineerId:null,start:'2026-01-01',end:'2026-12-31',budget:1000,status:'Em andamento',notes:''});
 let data=await request('GET');assert.equal(data.stages.length,9);assert.deepEqual(new Set(data.stages.map(s=>s.name)),new Set(['FUNDAÇÃO','TIJOLAMENTO','PILAR','LAJE CONCRETADA','TELHADO','REBOCO','PISO','CONTRA PISO','CORTE PAREDE']));
@@ -53,4 +53,27 @@ await request('POST',{action:'initialize'});
 data=await request('GET');assert.equal(data.stageTypes.length,10);assert.equal(data.stageTypes.find(t=>t.id==='default-type-0').name,'FUNDAÇÃO ESPECIAL');assert.equal(data.stages.find(s=>s.id===customStage.id).stageTypeId,customType.id);assert.equal(data.measurements.find(m=>m.id===first.id).amountCents,30000);assert.equal(data.stages.filter(s=>s.name==='FUNDAÇÃO').length,1);
 console.log('PASS: catálogo persistente, nove tipos iniciais, edição, unicidade por nome, vínculo com etapas, inicialização sem sobrescrita e preservação financeira.');
 console.log('PASS: nove etapas, inicialização idempotente, percentuais, períodos, cálculo em centavos, repetição segura, proteção do contrato, pagamentos, histórico, concorrência por revisão, cancelamento, conclusão em 100%, semana e compatibilidade com medições antigas.');
+
+const split=(a,b,c)=>[{name:'MA3',amountCents:a},{name:'ALEX',amountCents:b},{name:'Pedreiro',amountCents:c}];
+const allocationInput={requestId:crypto.randomUUID(),stageId:customStage.id,percent:100,previousId:'',periodStart:'2026-10-01',date:'2026-10-07',notes:'Divisão'};
+for(const allocations of [null,[],split(40000,20000,19999),split(40000,20000,20001),split(-1,40001,40000),split(40000.5,20000,19999.5),[{name:'MA3',amountCents:40000},{name:'MA3',amountCents:20000},{name:'Pedreiro',amountCents:20000}]])await create('measurements',{...allocationInput,allocations},400);
+assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM measurements WHERE stageId=?').get(customStage.id).n,0);
+const allocated=await create('measurements',{...allocationInput,allocations:split(40000,24000,16000)});
+let stored=sql.prepare('SELECT * FROM measurements WHERE id=?').get(allocated.id);
+assert.deepEqual(JSON.parse(stored.allocations).map(r=>r.percentBp),[5000,3000,2000]);
+await create('measurements',{...allocationInput,allocations:split(40000,24000,16000)},200);
+await create('measurements',{...allocationInput,allocations:split(30000,30000,20000)},409);
+await request('PATCH',{kind:'measurements',id:allocated.id,revision:0,data:{...allocationInput,allocations:split(30000,30000,20000)}});
+stored=sql.prepare('SELECT * FROM measurements WHERE id=?').get(allocated.id);
+assert.deepEqual(JSON.parse(stored.allocations).map(r=>r.amountCents),[30000,30000,20000]);
+assert.deepEqual(JSON.parse(JSON.parse(stored.editHistory)[0].previous.allocations).map(r=>r.amountCents),[40000,24000,16000]);
+await request('PATCH',{kind:'measurements',id:allocated.id,revision:0,data:{...allocationInput,allocations:split(30000,30000,20000)}},409);
+await request('PATCH',{action:'payment',id:allocated.id,paid:true,paidAt:'2026-10-08',revision:1});
+await request('PATCH',{kind:'measurements',id:allocated.id,revision:2,data:{...allocationInput,allocations:split(0,0,80000)}},400);
+assert.equal(sql.prepare('SELECT allocations FROM measurements WHERE id=?').get(allocated.id).allocations,stored.allocations);
+// A legacy measurement has no invented allocation and remains payable.
+sql.prepare('UPDATE measurements SET allocations=NULL WHERE id=?').run(first.id);
+await request('PATCH',{action:'payment',id:first.id,paid:true,paidAt:'2026-10-08',revision:0});
+assert.equal(sql.prepare('SELECT allocations FROM measurements WHERE id=?').get(first.id).allocations,null);
+console.log('PASS: allocation totals, invalid/duplicate layers, cents, persistence, idempotency, edit audit, concurrency, paid protection and legacy preservation.');
 sql.close();
