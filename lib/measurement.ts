@@ -14,4 +14,17 @@ export function normalizeMeasurements(stages:Row[],rows:Row[]){
 }
 export function stageLedger(rows:Row[],id:string){return rows.filter(m=>m.stageId===id&&!m.cancelledAt).sort((a,b)=>a.date.localeCompare(b.date)||(a.sequence||0)-(b.sequence||0))}
 export function calculateCents(contract:number,endBp:number,already:number){return Number((BigInt(Math.round(contract))*BigInt(Math.round(endBp))+BigInt(5000))/BigInt(10000))-already}
+// Draft fields can be empty while typing; payment dialogs have no percentage.
+export function previewMeasurement(kind:string|undefined,contract:number,percent:unknown,already:number):number|null{
+ if(kind!=='measurements'||percent===''||percent==null)return null;
+ const p=Number(percent);
+ if(!Number.isSafeInteger(contract)||contract<=0||!Number.isSafeInteger(already)||already<0||!Number.isFinite(p)||p<0||p>100)return null;
+ return calculateCents(contract,Math.round(p*100),already);
+}
+export function percentFromAmount(contract:number,amount:unknown,already:number):number|null{
+ if(amount===''||amount==null||!Number.isSafeInteger(contract)||contract<=0||!Number.isSafeInteger(already)||already<0)return null;
+ const value=Number(amount),cents=Math.round(value*100);
+ if(!Number.isFinite(value)||value<=0||!Number.isSafeInteger(cents)||cents+already>contract)return null;
+ return Number((BigInt(cents+already)*BigInt(10000)+BigInt(Math.floor(contract/2)))/BigInt(contract))/100;
+}
 export function weekRange(day:string){const d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()-(d.getUTCDay()+6)%7);const start=d.toISOString().slice(0,10);d.setUTCDate(d.getUTCDate()+6);return {start,end:d.toISOString().slice(0,10)}}

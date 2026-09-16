@@ -7,7 +7,7 @@ Sistema em português para cadastro e acompanhamento de obras de engenharia.
 - Equipes: líder, serviço, integrantes e obra vinculada.
 - Tipos de etapas: catálogo compartilhado, nome, descrição, cadastro e edição; nove tipos iniciais disponíveis para seleção.
 - Etapas por obra: nove etapas iniciais, cadastro e edição, empreiteira, valor contratado para 100% e período.
-- Medições: percentual acumulado (duas casas decimais), variação por período, avanço semanal, valor financeiro salvo, pagamento e histórico.
+- Medições: campos dinâmicos de valor do período e percentual acumulado (duas casas decimais), variação por período, avanço semanal, valor financeiro salvo, pagamento e histórico. Valores que não correspondem exatamente a um percentual de duas casas exibem o ajuste de arredondamento antes de salvar.
 - Documentos: importação de arquivos por obra e categoria, abertura, download e exclusão.
 
 O sistema exibe somente os cadastros reais, sem demonstrações. Os cadastros reais são persistidos no D1; os documentos ficam no R2. A página de entrada é pública; dados e documentos exigem login com usuário e senha e as permissões do cadastro. Valor medido não equivale a valor pago. Arquivos importados são armazenados; não há extração automática de conteúdo nem interpretação de projetos CAD.
@@ -67,7 +67,7 @@ Todas as listas usam dados reais. O histórico de medições abre sem filtro de 
 
 Exclusões de obras, tipos, etapas e engenheiros com vínculos são bloqueadas com orientação para desvincular primeiro. Etapas com medições permanecem preservadas. A última medição pendente pode ser editada com revisão de concorrência e histórico do cálculo anterior; medições pagas e anteriores não são recalculadas. Excluir uma medição significa cancelar seu efeito no saldo, mantendo seu histórico. O catálogo inicial é criado uma única vez, sem recriar tipos excluídos.
 
-Antes de cada publicação, seguir AGENTS.md: backup do código e pacote anterior, cópia integral das tabelas e arquivos anexados, validação da restauração SQLite e hashes. A ferramenta scripts/verify-backup.mjs verifica a cópia e gera verified.json. Backups ficam em .sites-runtime/backups, fora do pacote e do Git. Esta é uma etapa obrigatória do procedimento de publicação; não é uma rotina agendada nem um bloqueio de publicações feitas fora deste procedimento. Em presença de dados truncados ou arquivos sem acesso, não publicar até completar o backup.
+Antes de iniciar ajustes, correções ou melhorias, seguir AGENTS.md: backup do código e pacote anterior, cópia integral das tabelas e arquivos anexados, validação da restauração SQLite e hashes. Revalidar antes de publicar; se os dados mudaram, preservar a cópia inicial e criar outra atualizada. A ferramenta scripts/verify-backup.mjs verifica a cópia e gera verified.json. Backups ficam em .sites-runtime/backups, fora do pacote e do Git. Esta é uma etapa obrigatória do procedimento; não é uma rotina agendada nem um bloqueio de publicações feitas fora deste procedimento. Em presença de dados truncados ou arquivos sem acesso, não publicar até completar o backup. Nunca substituir os registros de produção por dados locais ou de teste.
 
 A revisão usa tests/users.mjs, tests/management.mjs e tests/measurements.mjs, além de TypeScript, compilação e verificação local. Os testes cobrem casos conhecidos, sem prometer ausência absoluta de falhas.
 

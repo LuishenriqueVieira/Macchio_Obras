@@ -9,6 +9,8 @@ if(!Array.isArray(snapshot.expectedTables)||snapshot.expectedTables.length!==Obj
 const db=new DatabaseSync(':memory:');
 for(const f of fs.readdirSync('drizzle').filter(f=>f.endsWith('.sql')).sort())db.exec(fs.readFileSync('drizzle/'+f,'utf8'));
 const counts={};
+// Native table exports are alphabetical; validate links after all parent rows exist.
+db.exec('BEGIN; PRAGMA defer_foreign_keys=ON');
 for(const [table,pages] of Object.entries(snapshot.tables)){
  if(!Array.isArray(pages)||!pages.length)throw Error('Tabela sem página de exportação: '+table);
  let expectedOffset=0;for(const p of pages){if(p.offset!==expectedOffset||p.table_name!==table)throw Error('Sequência de páginas inválida: '+table);expectedOffset=p.model_projection.next_offset}
@@ -18,6 +20,7 @@ for(const [table,pages] of Object.entries(snapshot.tables)){
  if(pages.at(-1).has_more||pages.at(-1).model_projection.next_offset!==null)throw Error('Paginação incompleta');
 }
 if(db.prepare('PRAGMA foreign_key_check').all().length)throw Error('Vínculos inconsistentes no backup');
+db.exec('COMMIT');
 if(counts.documents){for(const row of db.prepare('SELECT * FROM documents').all()){const f=path.join(dir,'documents',row.id);if(!fs.existsSync(f)||fs.statSync(f).size!==row.size)throw Error('Arquivo não copiado: '+row.id)}}
 const files=['database.json','source.bundle','published-site.tar.gz'];const hashes=Object.fromEntries(files.map(f=>[f,createHash('sha256').update(fs.readFileSync(path.join(dir,f))).digest('hex')]));
 fs.writeFileSync(path.join(dir,'verified.json'),JSON.stringify({verifiedAt:new Date().toISOString(),sourceCommit:snapshot.sourceCommit,projectId:snapshot.projectId,counts,hashes,documents:counts.documents?'copied':'none-linked',restoration:'SQLite schema + records + foreign keys verified'},null,2));db.close();console.log('Backup validado: estrutura, registros, vínculos e integridade dos arquivos.');
