@@ -6,7 +6,7 @@ import {expandPermissions,hasPermission,privileges,presets} from '@/lib/permissi
 const schema=z.object({name:z.string().trim().min(1).max(150),email:z.string().trim().email().max(254).transform(s=>s.toLowerCase()),username:z.string().transform(normalizeUsername).refine(validUsername),role:z.enum(['admin','engineer','viewer','custom']),active:z.boolean(),permissions:z.array(z.string()).max(privileges.length).refine(p=>p.every(k=>privileges.includes(k)))});
 const safeHeaders={'Cache-Control':'private, no-store'};
 export async function GET(request:Request){try{
- checkOrigin(request);const user=await currentUser(request);let users:any[]=[];if(hasPermission(user,'users.manage'))users=(await database().prepare('SELECT * FROM appUsers ORDER BY createdAt DESC').all()).results.map(publicUser);
+ checkOrigin(request);const user=await currentUser(request);let users:any[]=[];if(hasPermission(user,'users.manage'))users=(await database().prepare('SELECT * FROM appUsers WHERE deletedAt IS NULL ORDER BY createdAt DESC').all()).results.map(publicUser);
  const setup=user?null:await ownerSetup(request),pending=await database().prepare("SELECT id FROM appUsers WHERE id='owner' AND active=1 AND passwordHash IS NULL").first();
  return Response.json({user,users,setup:setup?{name:setup.name,username:setup.username}:null,needsOwnerSetup:!!pending},{headers:{...safeHeaders,...(user?{'Set-Cookie':sessionCookie(request,sessionToken(request))}:{})}});
 }catch(e){return failure(e)}}
@@ -14,7 +14,7 @@ export async function POST(request:Request){try{
  const admin=await requireUser(request,'users.manage'),body:any=await request.json(),db=database(),now=new Date().toISOString();
  if(body.action==='password'){
   if(typeof body.id!=='string'||!validPassword(body.password))return invalid('Use uma senha somente numérica, com no máximo 8 dígitos.');
-  const old:any=await db.prepare('SELECT * FROM appUsers WHERE id=?').bind(body.id).first();if(!old)return invalid('Usuário não encontrado.',404);
+  const old:any=await db.prepare('SELECT * FROM appUsers WHERE id=?').bind(body.id).first();if(!old||old.deletedAt)return invalid('Usuário não encontrado.',404);
   if(old.id==='owner'||old.id===admin.id)return invalid('Para sua própria conta, use Minha senha. A senha do administrador principal só pode ser alterada por ele.',403);
   const hash=await hashPassword(body.password),result=await db.batch([db.prepare('UPDATE appUsers SET passwordHash=?,authVersion=authVersion+1,activationHash=NULL,activationExpiresAt=NULL,updatedAt=?,revision=revision+1 WHERE id=? AND revision=? RETURNING id').bind(hash,now,old.id,old.revision),db.prepare('INSERT INTO userAudit(id,userId,actorId,action,createdAt) SELECT ?,?,?,?,? WHERE changes()>0').bind(crypto.randomUUID(),old.id,admin.id,'Senha redefinida pelo administrador',now)]);
   if(!result[0].results.length)return invalid('O cadastro mudou. Atualize os dados.',409);return Response.json({ok:true},{headers:safeHeaders});
@@ -27,10 +27,12 @@ export async function POST(request:Request){try{
 }catch(e){return failure(e)}}
 export async function PATCH(request:Request){try{
  const admin=await requireUser(request,'users.manage'),body:any=await request.json(),parsed=schema.safeParse(body.data);if(!parsed.success||typeof body.id!=='string'||!Number.isInteger(body.revision))return invalid('Confira os dados do usuário.');
- const d=parsed.data,db=database(),old:any=await db.prepare('SELECT * FROM appUsers WHERE id=?').bind(body.id).first();if(!old)return invalid('Usuário não encontrado.',404);
+ const d=parsed.data,db=database(),old:any=await db.prepare('SELECT * FROM appUsers WHERE id=?').bind(body.id).first();if(!old||old.deletedAt)return invalid('Usuário não encontrado.',404);
  const permissions=expandPermissions(d.role==='admin'?presets.admin:d.permissions);
  if(old.id==='owner'&&(admin.id!=='owner'||!d.active||d.role!=='admin'))return invalid('O administrador principal deve permanecer ativo com acesso completo e somente ele pode editar sua conta.',403);
  if(old.id===admin.id&&(!d.active||(d.role!=='admin'&&!permissions.includes('users.manage'))))return invalid('Você não pode remover o próprio acesso à administração.');
  const now=new Date().toISOString(),r=await db.batch([db.prepare('UPDATE OR IGNORE appUsers SET name=?,email=?,username=?,role=?,active=?,permissions=?,authVersion=authVersion+?,revision=revision+1,updatedAt=? WHERE id=? AND revision=? RETURNING id').bind(d.name,d.email,d.username,d.role,d.active?1:0,JSON.stringify(permissions),old.active&&!d.active?1:0,now,body.id,body.revision),db.prepare('INSERT INTO userAudit(id,userId,actorId,action,createdAt) SELECT ?,?,?,?,? WHERE changes()>0').bind(crypto.randomUUID(),old.id,admin.id,JSON.stringify({role:d.role,active:d.active,permissions}),now)]);
  if(!r[0].results.length)return invalid('O cadastro mudou ou o usuário/e-mail já está em uso. Atualize os dados.',409);return Response.json({id:body.id},{headers:safeHeaders});
 }catch(e){return failure(e)}}
+
+export async function DELETE(request:Request){try{const admin=await requireUser(request,'users.delete');const {id}=await request.json() as any;if(typeof id!=='string')return invalid('Usuário inválido.');if(id==='owner'||id===admin.id)return invalid('Não é possível excluir o administrador principal ou o próprio acesso.',403);const db=database(),now=new Date().toISOString(),result=await db.batch([db.prepare('UPDATE appUsers SET active=0,deletedAt=?,authVersion=authVersion+1,revision=revision+1,updatedAt=? WHERE id=? AND deletedAt IS NULL RETURNING id').bind(now,now,id),db.prepare('INSERT INTO userAudit(id,userId,actorId,action,createdAt) SELECT ?,?,?,?,? WHERE changes()>0').bind(crypto.randomUUID(),id,admin.id,'Usuário excluído; histórico preservado',now)]);if(!result[0].results.length)return invalid('Usuário não encontrado.',404);return Response.json({ok:true})}catch(e){return failure(e)}}

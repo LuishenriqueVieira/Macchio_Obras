@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
+import ts from 'typescript';
+const db=new DatabaseSync(':memory:');db.exec('PRAGMA foreign_keys=ON');for(const f of fs.readdirSync('drizzle').filter(f=>f.endsWith('.sql')).sort())db.exec(fs.readFileSync('drizzle/'+f,'utf8'));
+function statement(q,args=[]){return {bind(...a){return statement(q,a)},async first(){return db.prepare(q).get(...args)||null},async all(){return {results:db.prepare(q).all(...args)}},async run(){return db.prepare(q).run(...args)}}}
+globalThis.testDb={prepare:statement,async batch(stmts){db.exec('BEGIN');try{const r=[];for(const s of stmts)r.push(await s.all());db.exec('COMMIT');return r}catch(e){db.exec('ROLLBACK');throw e}}};
+const objects=new Map();globalThis.testBucket={async put(k,body){objects.set(k,await new Response(body).arrayBuffer())},async get(k){return objects.has(k)?{body:objects.get(k)}:null},async delete(k){objects.delete(k)}};
+const url=s=>'data:text/javascript;base64,'+Buffer.from(s).toString('base64'),compile=p=>ts.transpileModule(fs.readFileSync(p,'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const perms=url(compile('lib/permissions.ts')),helpers=url(compile('lib/measurement.ts')),access=url("export const authorize=()=>{};export const database=()=>globalThis.testDb;export const invalid=(error,status=400)=>Response.json({error},{status});export const failure=e=>e instanceof Response?e:Response.json({error:String(e)},{status:503})");
+const users=url(`import {hasPermission} from '${perms}';export async function requireUser(r,p){if(!globalThis.currentUser)throw Response.json({error:'Login'},{status:401});if(p&&!hasPermission(globalThis.currentUser,p))throw Response.json({error:'Permissão'},{status:403});return globalThis.currentUser}`);
+const route=async p=>import(url(compile(p).replace("'@/db/users'",JSON.stringify(users)).replace("'@/db/access'",JSON.stringify(access)).replace("'@/lib/permissions'",JSON.stringify(perms)).replace("'@/lib/measurement'",JSON.stringify(helpers)).replace("'zod'",JSON.stringify(import.meta.resolve('zod'))).replace("'cloudflare:workers'",JSON.stringify(url('export const env={BUCKET:globalThis.testBucket};')))));
+const api=await route('app/api/data/route.ts'),docs=await route('app/api/documents/route.ts');globalThis.currentUser={id:'admin-test',active:true,role:'admin',permissions:[]};
+async function req(method,body,status=200,target=api,query=''){const r=await target[method](new Request('https://test.local/api'+query,{method,headers:body instanceof FormData?{}:{'Content-Type':'application/json'},...(body?{body:body instanceof FormData?body:JSON.stringify(body)}:{})}));const text=await r.text();assert.equal(r.status,status,text.slice(0,500));try{return JSON.parse(text)}catch{return text}}
+const create=(kind,data)=>req('POST',{kind,data},201),edit=(kind,id,data)=>req('PATCH',{kind,id,data}),del=(kind,id,status=200)=>req('DELETE',{kind,id},status);
+const eng=await create('engineers',{name:'Profissional teste',crea:'123-SP',specialty:'Civil',email:'',phone:''});await edit('engineers',eng.id,{name:'Profissional revisado',crea:'123-SP',specialty:'Estruturas',email:'teste@example.com',phone:'123'});
+const project=await create('projects',{name:'Obra CRUD',client:'Cliente',address:'Endereço',engineerId:eng.id,start:'2026-01-01',end:'2026-12-31',budget:1000,status:'Planejamento',notes:'Observação'});
+await del('engineers',eng.id,409);await del('projects',project.id,409);
+const team=await create('teams',{name:'Equipe',leader:'Líder',trade:'Civil',members:'Pessoa 1\nPessoa 2',projectId:project.id});await edit('teams',team.id,{name:'Equipe 2',leader:'Líder',trade:'Civil',members:'Pessoa 1',projectId:project.id});
+const type=await create('stageTypes',{name:'Tipo CRUD',description:'Inicial'});await edit('stageTypes',type.id,{name:'Tipo revisado',description:'Atualizado'});
+let all=await req('GET');const stage=all.stages[0];await edit('stages',stage.id,{...stage,stageTypeId:type.id,name:'Etapa medida',contractor:'Empreiteira',contractValue:1000.01});await del('stageTypes',type.id,409);
+const measure={requestId:crypto.randomUUID(),stageId:stage.id,periodStart:'2026-02-01',date:'2026-02-07',percent:20,previousId:'',notes:'Original'};const first=await create('measurements',measure);
+const second=await create('measurements',{...measure,requestId:crypto.randomUUID(),previousId:first.id,percent:40,periodStart:'2026-02-08',date:'2026-02-14'});
+await req('PATCH',{kind:'measurements',id:first.id,revision:0,data:measure},400);
+await req('PATCH',{kind:'measurements',id:second.id,revision:0,data:{...measure,percent:35,periodStart:'2026-02-08',date:'2026-02-15',notes:'Corrigido'}});
+all=await req('GET');const updated=all.measurements.find(x=>x.id===second.id);assert.equal(updated.startBp,2000);assert.equal(updated.endBp,3500);assert.equal(updated.amountCents,15000);assert.equal(updated.revision,1);assert.equal(JSON.parse(updated.editHistory)[0].previous.endBp,4000);
+await req('PATCH',{kind:'measurements',id:second.id,revision:0,data:measure},409);await req('PATCH',{kind:'measurements',id:second.id,revision:1,data:{...measure,percent:19}},400);
+await req('PATCH',{action:'payment',id:second.id,revision:1,paid:true,paidAt:'2026-02-16'});await req('PATCH',{kind:'measurements',id:second.id,revision:2,data:measure},400);await del('measurements',second.id,400);await del('stages',stage.id,409);
+await req('PATCH',{action:'payment',id:second.id,revision:2,paid:false,paidAt:null});await del('measurements',second.id);assert.ok((await req('GET')).measurements.find(x=>x.id===second.id).cancelledAt);
+const form=new FormData();form.set('file',new File(['%PDF-test'],'teste.pdf',{type:'application/pdf'}));form.set('projectId',project.id);form.set('category','Projeto');const document=await req('POST',form,201,docs);await req('PATCH',{id:document.id,name:'projeto-renomeado.pdf',projectId:project.id,category:'Contrato'},200,docs);assert.equal(await req('GET',null,200,docs,'?id='+document.id),'%PDF-test');
+// A consulta não dá direito a editar ou excluir; liberação de exclusão é independente.
+globalThis.currentUser={id:'viewer',active:true,role:'custom',permissions:['projects.view','stageTypes.view','stages.view','measurements.view','documents.view','engineers.view','teams.view']};
+for(const kind of ['projects','stageTypes','stages','measurements','engineers','teams']){await req('POST',{kind,data:{}},403);await del(kind,kind==='measurements'?first.id:'missing',403)}
+await req('PATCH',{id:document.id,name:'x',category:'Contrato',projectId:project.id},403,docs);await req('DELETE',{id:document.id},403,docs);
+globalThis.currentUser={id:'editor',active:true,role:'custom',permissions:['teams.edit']};await del('teams',team.id,403);
+globalThis.currentUser.permissions=['teams.delete'];await del('teams',team.id);await req('POST',{kind:'teams',data:{}},403);
+globalThis.currentUser={id:'admin-test',active:true,role:'admin',permissions:[]};await req('DELETE',{id:document.id},200,docs);assert.equal(objects.size,0);await req('GET',null,404,docs,'?id='+document.id);
+// Exclusão de tipos iniciais não é desfeita ao recarregar o sistema.
+all=await req('GET');const unused=all.stages.find(x=>x.id!==stage.id);await del('stages',unused.id);db.exec("DELETE FROM systemSettings WHERE id='stage-types-initialized'");await del('stageTypes',unused.stageTypeId);await req('POST',{action:'initialize'});assert.ok(!(await req('GET')).stageTypes.some(x=>x.id===unused.stageTypeId));
+const clean=await create('projects',{name:'Obra sem histórico',client:'Cliente',address:'Local',engineerId:null,start:'2026-01-01',end:'2026-12-31',budget:0,status:'Planejamento',notes:''});for(const s of (await req('GET')).stages.filter(x=>x.projectId===clean.id))await del('stages',s.id);await del('projects',clean.id);assert.ok(!(await req('GET')).projects.some(x=>x.id===clean.id));
+assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0);console.log('PASS: CRUD e permissões por ação em todos os cadastros; documentos reais; edição financeira com histórico e concorrência; proteção de pagos e vínculos; tipos excluídos não recriados.');db.close();

@@ -16,7 +16,7 @@ const schemas={
 };
 const kinds=Object.keys(schemas);
 async function initialize(db:ReturnType<typeof database>){
- await db.batch(initialStages.map((name,i)=>db.prepare('INSERT OR IGNORE INTO stageTypes(id,name,nameKey,description) VALUES(?,?,?,?)').bind('default-type-'+i,name,typeKey(name),'')));
+ await db.batch([...initialStages.map((name,i)=>db.prepare("INSERT OR IGNORE INTO stageTypes(id,name,nameKey,description) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM systemSettings WHERE id='stage-types-initialized')").bind('default-type-'+i,name,typeKey(name),'')),db.prepare("INSERT OR IGNORE INTO systemSettings(id,value) VALUES('stage-types-initialized','1')")]);
  const defaults=(await db.prepare("SELECT * FROM stageTypes WHERE id LIKE 'default-type-%' ORDER BY rowid").all<any>()).results;
  await db.batch(defaults.map(t=>db.prepare('UPDATE stages SET stageTypeId=? WHERE stageTypeId IS NULL AND name=? COLLATE NOCASE').bind(t.id,t.name)));
  const works=await db.prepare('SELECT * FROM projects WHERE stagesInitialized=0').all<any>();
@@ -36,7 +36,7 @@ async function save(request:Request,editing:boolean){try{
   const r=await db.prepare('UPDATE measurements SET paid=?,paidAt=?,paymentHistory=?,revision=revision+1 WHERE id=? AND revision=? AND cancelledAt IS NULL RETURNING id').bind(d.paid?1:0,d.paid?d.paidAt:null,JSON.stringify(history),d.id,d.revision).all();
   if(!r.results.length)return invalid('Este lançamento foi atualizado. Recarregue os dados.',409);return Response.json({id:d.id});
  }
- const kind=body.kind as keyof typeof schemas;if(!kinds.includes(kind))return invalid('Cadastro inválido.');if(editing&&kind==='measurements')return invalid('Os cálculos salvos não podem ser editados. Cancele o último lançamento pendente para corrigir.');
+ const kind=body.kind as keyof typeof schemas;if(!kinds.includes(kind))return invalid('Cadastro inválido.');
  await requireUser(request,kind+'.edit');
  const parsed=schemas[kind].safeParse(body.data);if(!parsed.success)return invalid(parsed.error.issues[0]?.message||'Confira os campos informados.');let d:any=parsed.data;
  const id=editing?req.parse(body.id):kind==='measurements'?d.requestId:crypto.randomUUID();
@@ -47,6 +47,18 @@ async function save(request:Request,editing:boolean){try{
   const key=typeKey(d.name);if(!key)return invalid('Informe o nome do tipo de etapa.');
   const result=editing?await db.prepare('UPDATE OR IGNORE stageTypes SET name=?,nameKey=?,description=? WHERE id=? RETURNING id').bind(d.name,key,d.description,id).all():await db.prepare('INSERT OR IGNORE INTO stageTypes(id,name,nameKey,description) VALUES(?,?,?,?) RETURNING id').bind(id,d.name,key,d.description).all();
   if(!result.results.length)return invalid('Já existe um tipo de etapa com esse nome.',409);
+ }else if(kind==='measurements'&&editing){
+  const old:any=await db.prepare('SELECT * FROM measurements WHERE id=?').bind(id).first();
+  if(!Number.isInteger(body.revision)||old.revision!==body.revision)return invalid('A medição mudou. Atualize os dados.',409);
+  if(old.paid||old.cancelledAt||old.stageId!==d.stageId)return invalid('Somente a última medição pendente pode ser alterada, mantendo a etapa.');
+  const stage:any=await db.prepare('SELECT * FROM stages WHERE id=?').bind(old.stageId).first(),raw=await db.prepare('SELECT rowid AS sequence,* FROM measurements WHERE stageId=?').bind(old.stageId).all<any>(),ledger=stageLedger(normalizeMeasurements([stage],raw.results),old.stageId);
+  if(ledger.at(-1)?.id!==id)return invalid('Somente a última medição pendente pode ser alterada.');
+  const prior=ledger.slice(0,-1),last=prior.at(-1),startBp=last?.endBp||0,endBp=Math.round(d.percent*100),base=old.contractCents??contractCents(stage);
+  if(endBp<=startBp||d.date<d.periodStart||(last&&d.periodStart<=last.date))return invalid('Confira o percentual e o período: devem superar a medição anterior.');
+  const amount=calculateCents(base,endBp,prior.reduce((sum,m)=>sum+amountCents(m),0));if(amount<0)return invalid('O novo valor é inferior ao total anterior.');
+  const history=JSON.parse(old.editHistory||'[]');history.push({changedAt:new Date().toISOString(),actorId:user.id,previous:{periodStart:old.periodStart,date:old.date,startBp:old.startBp,endBp:old.endBp,amountCents:old.amountCents,notes:old.notes}});
+  const result=await db.prepare('UPDATE measurements SET periodStart=?,date=?,startBp=?,endBp=?,amountCents=?,quantity=?,unitPrice=?,notes=?,editHistory=?,revision=revision+1 WHERE id=? AND revision=? AND paid=0 AND cancelledAt IS NULL AND id=(SELECT newer.id FROM measurements newer WHERE newer.stageId=measurements.stageId AND newer.cancelledAt IS NULL ORDER BY newer.date DESC,newer.rowid DESC LIMIT 1) RETURNING id').bind(d.periodStart,d.date,startBp,endBp,amount,(endBp-startBp)/100,base/10000,d.notes,JSON.stringify(history),id,body.revision).all();
+  if(!result.results.length)return invalid('A medição mudou. Atualize os dados.',409);
  }else if(kind==='measurements'){
   const duplicate:any=await db.prepare('SELECT * FROM measurements WHERE id=?').bind(id).first();if(duplicate){if(duplicate.stageId===d.stageId&&duplicate.endBp===Math.round(d.percent*100)&&duplicate.date===d.date&&duplicate.periodStart===d.periodStart&&duplicate.notes===d.notes)return Response.json({id});return invalid('Identificador já utilizado. Abra uma nova medição.',409)}
   const s:any=await db.prepare('SELECT * FROM stages WHERE id=?').bind(d.stageId).first();if(!s)return invalid('Selecione uma etapa cadastrada.');
@@ -67,4 +79,14 @@ async function save(request:Request,editing:boolean){try{
 }catch(e){return failure(e)}}
 export async function POST(r:Request){return save(r,false)}
 export async function PATCH(r:Request){return save(r,true)}
-export async function DELETE(request:Request){try{await requireUser(request,'measurements.cancel');const {id}=await request.json() as any;if(typeof id!=='string')return invalid('Medição inválida.');const db=database();const r=await db.prepare(`UPDATE measurements SET cancelledAt=?,revision=revision+1 WHERE id=? AND paid=0 AND cancelledAt IS NULL AND id=(SELECT newer.id FROM measurements newer WHERE newer.stageId=measurements.stageId AND newer.cancelledAt IS NULL ORDER BY newer.date DESC,newer.rowid DESC LIMIT 1) RETURNING id`).bind(new Date().toISOString(),id).all();if(!r.results.length)return invalid('Somente a última medição pendente da etapa pode ser cancelada.');return Response.json({ok:true})}catch(e){return failure(e)}}
+export async function DELETE(request:Request){try{
+ const body:any=await request.json(),kind=body.kind||'measurements',id=body.id;if(typeof id!=='string'||!kinds.includes(kind))return invalid('Cadastro inválido.');
+ await requireUser(request,kind==='measurements'?'measurements.cancel':kind+'.delete');const db=database();
+ if(kind==='measurements'){const r=await db.prepare(`UPDATE measurements SET cancelledAt=?,revision=revision+1 WHERE id=? AND paid=0 AND cancelledAt IS NULL AND id=(SELECT newer.id FROM measurements newer WHERE newer.stageId=measurements.stageId AND newer.cancelledAt IS NULL ORDER BY newer.date DESC,newer.rowid DESC LIMIT 1) RETURNING id`).bind(new Date().toISOString(),id).all();if(!r.results.length)return invalid('Somente a última medição pendente da etapa pode ser excluída.');return Response.json({ok:true})}
+ const blockers:Record<string,string>={projects:'EXISTS(SELECT 1 FROM stages WHERE projectId=?) OR EXISTS(SELECT 1 FROM teams WHERE projectId=?) OR EXISTS(SELECT 1 FROM documents WHERE projectId=?)',engineers:'EXISTS(SELECT 1 FROM projects WHERE engineerId=?)',stages:'EXISTS(SELECT 1 FROM measurements WHERE stageId=?)',stageTypes:'EXISTS(SELECT 1 FROM stages WHERE stageTypeId=?)',teams:'0'};
+ const predicate=blockers[kind];if(!predicate)return invalid('Cadastro inválido.');
+ if(kind==='stageTypes')await db.prepare("INSERT OR IGNORE INTO systemSettings(id,value) SELECT 'stage-types-initialized','1' WHERE EXISTS(SELECT 1 FROM stageTypes WHERE id=?)").bind(id).run();
+ const r=await db.prepare(`DELETE FROM ${kind} WHERE id=? AND NOT (${predicate}) RETURNING id`).bind(id,...Array((predicate.match(/\?/g)||[]).length).fill(id)).all();
+ if(!r.results.length){if(!await db.prepare(`SELECT id FROM ${kind} WHERE id=?`).bind(id).first())return invalid('Cadastro não encontrado.',404);return invalid('Existem registros vinculados. Remova ou desvincule esses registros antes de excluir. Etapas com histórico de medição são preservadas.',409)}
+ return Response.json({ok:true});
+}catch(e){return failure(e)}}

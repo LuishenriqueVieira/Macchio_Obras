@@ -10,7 +10,7 @@ Sistema em português para cadastro e acompanhamento de obras de engenharia.
 - Medições: percentual acumulado (duas casas decimais), variação por período, avanço semanal, valor financeiro salvo, pagamento e histórico.
 - Documentos: importação de arquivos por obra e categoria, abertura, download e exclusão.
 
-Os dados demonstrativos são fictícios e não são gravados no banco. Os cadastros reais são persistidos no D1; os documentos ficam no R2. A página de entrada é pública; dados e documentos exigem login com usuário e senha e as permissões do cadastro. Valor medido não equivale a valor pago. Arquivos importados são armazenados; não há extração automática de conteúdo nem interpretação de projetos CAD.
+O sistema exibe somente os cadastros reais, sem demonstrações. Os cadastros reais são persistidos no D1; os documentos ficam no R2. A página de entrada é pública; dados e documentos exigem login com usuário e senha e as permissões do cadastro. Valor medido não equivale a valor pago. Arquivos importados são armazenados; não há extração automática de conteúdo nem interpretação de projetos CAD.
 
 ## Execução
 
@@ -31,7 +31,7 @@ Limite de importação: 25 MB por arquivo. Projetos CAD são disponibilizados pa
 
 ## Identidade visual
 
-Logo, ícone e projetos do portfólio foram obtidos no site oficial da Macchio. A interface usa preto, branco, cinza e azul quase preto (#000422), com Montserrat hospedada junto do sistema. As imagens do portfólio são renderizações arquitetônicas; não são associadas aos cadastros demonstrativos como fotos reais dessas obras. Fontes dos assets: `docs/brand-sources.md`.
+Logo, ícone e projetos do portfólio foram obtidos no site oficial da Macchio. A interface usa preto, branco, cinza e azul quase preto (#000422), com Montserrat hospedada junto do sistema. As imagens do portfólio são renderizações arquitetônicas; não são tratadas como fotos dos cadastros reais. Fontes dos assets: `docs/brand-sources.md`.
 
 ## Medições percentuais
 
@@ -47,7 +47,7 @@ O catálogo de tipos é independente dos contratos. Selecionar um tipo preenche 
 
 ## Usuários e permissões
 
-A aba Usuários e permissões oferece perfis Administrador, Engenheiro, Consulta e Personalizado. Privilégios de consulta e alteração são validados nas APIs e refletidos nos menus e botões. Pagamentos, cancelamento de medições, exclusão de documentos e administração de usuários têm permissões próprias. As permissões se aplicam a todas as obras.
+A aba Usuários e permissões oferece perfis Administrador, Engenheiro, Consulta e Personalizado. Privilégios de consulta, alteração e exclusão são validados nas APIs e refletidos nos menus e botões. Pagamentos, cancelamento de medições, exclusão de documentos e administração de usuários têm permissões próprias. As permissões se aplicam a todas as obras.
 
 O administrador cadastra nome, e-mail de contato, usuário, senha inicial, perfil e situação. Novas senhas devem conter de 1 a 8 dígitos numéricos (0–9), incluindo zeros à esquerda. A validação vale para o primeiro acesso, cadastro, troca e redefinição de senha, tanto nos formulários quanto nas APIs. Senhas anteriores continuam válidas para login e confirmação da senha atual; ao alterá-las, aplica-se a nova regra. Não há expiração do cadastro, da senha nem links de ativação. As contas permanecem disponíveis até serem desativadas. A interface oferece Minha senha, Sair e redefinição de senha de outros usuários pelo administrador. A senha do administrador principal só pode ser alterada por ele, mediante a senha atual.
 
@@ -60,3 +60,17 @@ Cada requisição valida a situação, as permissões e a versão da autenticaç
 A migração aditiva 0004 cria sessões, limitação de tentativas e os campos de login, preservando obras e contas existentes. As colunas antigas de ativação ficam sem uso para preservar o histórico de migrações. Nenhuma senha ou conta é incluída em migrações.
 
 Validação: `node tests/users.mjs`, `node tests/measurements.mjs`, TypeScript, compilação e autenticação no Worker local.
+
+## Revisão de cadastros e publicação
+
+Todas as listas usam dados reais. O histórico de medições abre sem filtro de datas. Consulta, alteração e exclusão possuem controles próprios por módulo, validados no servidor. Cadastros técnicos têm consulta detalhada; documentos permitem alterar nome, obra e categoria. A exclusão de usuário encerra o acesso e preserva sua identidade no histórico; o login/e-mail fica reservado. Não é permitido excluir o próprio usuário ou o administrador principal.
+
+Exclusões de obras, tipos, etapas e engenheiros com vínculos são bloqueadas com orientação para desvincular primeiro. Etapas com medições permanecem preservadas. A última medição pendente pode ser editada com revisão de concorrência e histórico do cálculo anterior; medições pagas e anteriores não são recalculadas. Excluir uma medição significa cancelar seu efeito no saldo, mantendo seu histórico. O catálogo inicial é criado uma única vez, sem recriar tipos excluídos.
+
+Antes de cada publicação, seguir AGENTS.md: backup do código e pacote anterior, cópia integral das tabelas e arquivos anexados, validação da restauração SQLite e hashes. A ferramenta scripts/verify-backup.mjs verifica a cópia e gera verified.json. Backups ficam em .sites-runtime/backups, fora do pacote e do Git. Esta é uma etapa obrigatória do procedimento de publicação; não é uma rotina agendada nem um bloqueio de publicações feitas fora deste procedimento. Em presença de dados truncados ou arquivos sem acesso, não publicar até completar o backup.
+
+A revisão usa tests/users.mjs, tests/management.mjs e tests/measurements.mjs, além de TypeScript, compilação e verificação local. Os testes cobrem casos conhecidos, sem prometer ausência absoluta de falhas.
+
+## Interface de trabalho
+
+O menu está agrupado em Acompanhamento, Cadastros e arquivos e Administração, respeitando as permissões. O painel prioriza indicadores reais, saldo das medições pendentes e atalhos para obras, medições e documentos. Cabeçalhos, buscas, tabelas, estados vazios, formulários e ações usam padrões visuais consistentes, com adaptação para telas menores. O portfólio fica em uma área secundária; nenhuma imagem é apresentada como lançamento real.
