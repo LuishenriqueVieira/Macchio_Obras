@@ -1,37 +1,47 @@
 import type {Row} from './obras';
 export const initialStages=['FUNDAÇÃO','TIJOLAMENTO','PILAR','LAJE CONCRETADA','TELHADO','REBOCO','PISO','CONTRA PISO','CORTE PAREDE'];
+export const VALUE_SCALE=10000;
+export const PERCENT_SCALE=10000;
+export const PERCENT_TOTAL=100*PERCENT_SCALE;
 export const contractCents=(s:Row)=>s.contractCents??Math.round(s.quantity*s.price*100);
 export const amountCents=(m:Row)=>m.amountCents??Math.round(m.quantity*m.unitPrice*100);
+export const contractUnits=(s:Row)=>s.contractUnits??contractCents(s)*100;
+export const amountUnits=(m:Row)=>m.amountUnits??amountCents(m)*100;
+export const startPercentUnits=(m:Row)=>m.startP4??Math.round((m.startBp??0)*100);
+export const endPercentUnits=(m:Row)=>m.endP4??Math.round((m.endBp??0)*100);
 export function normalizeMeasurements(stages:Row[],rows:Row[]){
  const balances=new Map<string,number>();
  return [...rows].sort((a,b)=>a.date.localeCompare(b.date)||(a.sequence||0)-(b.sequence||0)).map(m=>{
   const s=stages.find(s=>s.id===m.stageId);const previous=balances.get(m.stageId)||0;
-  const end=m.endBp??Math.min(10000,previous+Math.round(m.quantity/(s?.quantity||1)*10000));
-  const result={...m,startBp:m.startBp??previous,endBp:end,amountCents:amountCents(m),contractCents:m.contractCents??(s?contractCents(s):0),stageName:m.stageName||s?.name||'Etapa',contractor:m.contractor||s?.contractor||'Não informado',periodStart:m.periodStart||m.date};
+  const end=m.endP4??(m.endBp==null?Math.min(PERCENT_TOTAL,previous+Math.round(m.quantity/(s?.quantity||1)*PERCENT_TOTAL)):Math.round(m.endBp*100));
+  const start=m.startP4??(m.startBp==null?previous:Math.round(m.startBp*100));
+  const result={...m,startP4:start,endP4:end,amountUnits:amountUnits(m),contractUnits:m.contractUnits??(m.contractCents==null?(s?contractUnits(s):0):m.contractCents*100),stageName:m.stageName||s?.name||'Etapa',contractor:m.contractor||s?.contractor||'Não informado',periodStart:m.periodStart||m.date};
   if(!m.cancelledAt)balances.set(m.stageId,end);
   return result;
  });
 }
 export function stageLedger(rows:Row[],id:string){return rows.filter(m=>m.stageId===id&&!m.cancelledAt).sort((a,b)=>a.date.localeCompare(b.date)||(a.sequence||0)-(b.sequence||0))}
 export function calculateCents(contract:number,endBp:number,already:number){return Number((BigInt(Math.round(contract))*BigInt(Math.round(endBp))+BigInt(5000))/BigInt(10000))-already}
+export function calculateUnits(contract:number,endP4:number,already:number){return Number((BigInt(Math.round(contract))*BigInt(Math.round(endP4))+BigInt(PERCENT_TOTAL/2))/BigInt(PERCENT_TOTAL))-already}
 // Draft fields can be empty while typing; payment dialogs have no percentage.
 export function previewMeasurement(kind:string|undefined,contract:number,percent:unknown,already:number):number|null{
  if(kind!=='measurements'||percent===''||percent==null)return null;
  const p=Number(percent);
  if(!Number.isSafeInteger(contract)||contract<=0||!Number.isSafeInteger(already)||already<0||!Number.isFinite(p)||p<0||p>100)return null;
- return calculateCents(contract,Math.round(p*100),already);
+ if(Math.abs(p*PERCENT_SCALE-Math.round(p*PERCENT_SCALE))>1e-6)return null;
+ return calculateUnits(contract,Math.round(p*PERCENT_SCALE),already);
 }
 export function percentFromAmount(contract:number,amount:unknown,already:number):number|null{
  if(amount===''||amount==null||!Number.isSafeInteger(contract)||contract<=0||!Number.isSafeInteger(already)||already<0)return null;
- const value=Number(amount),cents=Math.round(value*100);
- if(!Number.isFinite(value)||value<=0||!Number.isSafeInteger(cents)||cents+already>contract)return null;
- return Number((BigInt(cents+already)*BigInt(10000)+BigInt(Math.floor(contract/2)))/BigInt(contract))/100;
+ const value=Number(amount),units=Math.round(value*VALUE_SCALE);
+ if(!Number.isFinite(value)||value<=0||Math.abs(value*VALUE_SCALE-units)>1e-6||!Number.isSafeInteger(units)||units+already>contract)return null;
+ return Number((BigInt(units+already)*BigInt(PERCENT_TOTAL)+BigInt(Math.floor(contract/2)))/BigInt(contract))/PERCENT_SCALE;
 }
 
 export const allocationNames=['MA3','ALEX','Pedreiro'] as const;
-export type Allocation={name:typeof allocationNames[number];amountCents:number;percentBp:number};
+export type Allocation={name:typeof allocationNames[number];amountUnits:number;percentP4:number};
 export type AllocationDraft={mode:'amount'|'percent';input:string};
-// Largest remainders close integer cents/percentage points without losing fractions.
+// Largest remainders close the four-decimal value and percentage units exactly.
 function apportion(total:number,weights:number[],denominator:number){
  const products=weights.map(w=>BigInt(total)*BigInt(w)),base=products.map(p=>Number(p/BigInt(denominator)));
  let remainder=total-base.reduce((a,b)=>a+b,0);
@@ -40,26 +50,26 @@ function apportion(total:number,weights:number[],denominator:number){
 }
 export function validateAllocations(raw:unknown,total:number):Allocation[]|null{
  if(!Number.isSafeInteger(total)||total<=0||!Array.isArray(raw)||raw.length!==3)return null;
- const amounts=allocationNames.map(name=>{const matches=raw.filter(r=>r&&r.name===name);return matches.length===1?matches[0].amountCents:NaN});
+ const amounts=allocationNames.map(name=>{const matches=raw.filter((r:any)=>r&&r.name===name);if(matches.length!==1)return NaN;const row:any=matches[0];return row.amountUnits??(Number.isSafeInteger(row.amountCents)?row.amountCents*100:NaN)});
  if(amounts.some(v=>!Number.isSafeInteger(v)||v<0||v>total)||amounts.reduce((a,b)=>a+b,0)!==total)return null;
- const percentages=apportion(10000,amounts,total);
- return allocationNames.map((name,i)=>({name,amountCents:amounts[i],percentBp:percentages[i]}));
+ const percentages=apportion(PERCENT_TOTAL,amounts,total);
+ return allocationNames.map((name,i)=>({name,amountUnits:amounts[i],percentP4:percentages[i]}));
 }
 export function readAllocations(raw:unknown,total:number):Allocation[]|null{
  try{return validateAllocations(typeof raw==='string'?JSON.parse(raw):raw,total)}catch{return null}
 }
 export function allocationDrafts(raw:unknown,total:number):AllocationDraft[]{
- const rows=readAllocations(raw,total);return allocationNames.map((_,i)=>({mode:'amount',input:rows?(rows[i].amountCents/100).toFixed(2):'0.00'}));
+ const rows=readAllocations(raw,total);return allocationNames.map((_,i)=>({mode:'amount',input:rows?(rows[i].amountUnits/VALUE_SCALE).toFixed(4):'0.0000'}));
 }
 export function resolveAllocationDrafts(total:number,drafts:AllocationDraft[]=[]){
  const inputs=allocationNames.map((_,i)=>drafts[i]||{mode:'amount',input:''});
- const scaled=inputs.map(d=>{const n=Number(d.input);return d.input.trim()!==''&&Number.isFinite(n)&&n>=0&&Math.abs(n*100-Math.round(n*100))<1e-6&&n<=(d.mode==='percent'?100:1e10)?Math.round(n*100):null});
+ const scaled=inputs.map(d=>{const n=Number(d.input);return d.input.trim()!==''&&Number.isFinite(n)&&n>=0&&Math.abs(n*(d.mode==='percent'?PERCENT_SCALE:VALUE_SCALE)-Math.round(n*(d.mode==='percent'?PERCENT_SCALE:VALUE_SCALE)))<1e-6&&n<=(d.mode==='percent'?100:1e10)?Math.round(n*(d.mode==='percent'?PERCENT_SCALE:VALUE_SCALE)):null});
  const usable=Number.isSafeInteger(total)&&total>0;
- let amounts=scaled.map((n,i)=>n===null?null:inputs[i].mode==='amount'?n:usable?calculateCents(total,n,0):0);
- if(usable&&inputs.every(d=>d.mode==='percent')&&scaled.every(n=>n!==null)&&scaled.reduce<number>((s,n)=>s+(n||0),0)===10000)amounts=apportion(total,scaled as number[],10000);
+ let amounts=scaled.map((n,i)=>n===null?null:inputs[i].mode==='amount'?n:usable?calculateUnits(total,n,0):0);
+ if(usable&&inputs.every(d=>d.mode==='percent')&&scaled.every(n=>n!==null)&&scaled.reduce<number>((s,n)=>s+(n||0),0)===PERCENT_TOTAL)amounts=apportion(total,scaled as number[],PERCENT_TOTAL);
  const sum=amounts.reduce<number>((s,n)=>s+(n||0),0);
- const valid=usable&&scaled.every(n=>n!==null)?validateAllocations(allocationNames.map((name,i)=>({name,amountCents:amounts[i]})),total):null;
- const rows=allocationNames.map((name,i)=>({name,amountCents:amounts[i],percentBp:valid?valid[i].percentBp:usable?Math.round((amounts[i]||0)/total*10000):0}));
+ const valid=usable&&scaled.every(n=>n!==null)?validateAllocations(allocationNames.map((name,i)=>({name,amountUnits:amounts[i]})),total):null;
+ const rows=allocationNames.map((name,i)=>({name,amountUnits:amounts[i],percentP4:valid?valid[i].percentP4:usable?Math.round((amounts[i]||0)/total*PERCENT_TOTAL):0}));
  return {rows,sum,remaining:usable?total-sum:0,valid};
 }
 export function weekRange(day:string){const d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()-(d.getUTCDay()+6)%7);const start=d.toISOString().slice(0,10);d.setUTCDate(d.getUTCDate()+6);return {start,end:d.toISOString().slice(0,10)}}
