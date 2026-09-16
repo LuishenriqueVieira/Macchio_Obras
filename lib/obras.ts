@@ -2,7 +2,7 @@ import {contractUnits,amountUnits,VALUE_SCALE} from './measurement';
 export type Row=Record<string,any>;
 export type Store={stageTypes:Row[];projects:Row[];engineers:Row[];teams:Row[];stages:Row[];measurements:Row[];documents:Row[]};
 export const empty:Store={stageTypes:[],projects:[],engineers:[],teams:[],stages:[],measurements:[],documents:[]};
-export const money=(v:number)=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:4,maximumFractionDigits:4}).format(v||0);
+export const money=(v:number)=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:2,maximumFractionDigits:2}).format(v||0);
 export const number=(v:number)=>new Intl.NumberFormat('pt-BR',{minimumFractionDigits:4,maximumFractionDigits:4}).format(v||0);
 export const dateLabel=(v:string)=>v?new Date(v.slice(0,10)+'T12:00:00').toLocaleDateString('pt-BR'):'—';
 export const today=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/Sao_Paulo'});

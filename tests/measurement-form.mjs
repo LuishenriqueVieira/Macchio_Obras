@@ -21,48 +21,50 @@ const payment={id:'m',stageId:'s',stageName:'Fundação',contractor:'Empreiteira
 const original=form;form=payment;assert.doesNotThrow(()=>render('payment',payment));form=original;
 assert.equal(input('measurementValue').props.value,'');
 let selected=0;input('percent').props.onFocus({currentTarget:{select(){selected++}}});input('measurementValue').props.onFocus({currentTarget:{select(){selected++}}});assert.equal(selected,2);
-input('percent').props.onChange({target:{value:'50'}});assert.equal(input('measurementValue').props.value,'200.0000');assert.equal(input('percent').props.step,'0.0001');assert.equal(input('measurementValue').props.step,'0.0001');
+input('percent').props.onChange({target:{value:'50'}});assert.equal(input('measurementValue').props.value,'200.00');assert.equal(input('percent').props.step,'0.0001');assert.equal(input('measurementValue').props.step,'0.01');
 input('measurementValue').props.onChange({target:{value:'150.00'}});assert.equal(form.percent,45);assert.equal(input('percent').props.value,45);
 input('percent').props.onChange({target:{value:''}});assert.equal(input('measurementValue').props.value,'');
 input('measurementValue').props.onChange({target:{value:'700'}});assert.equal(form.percent,100);
 input('measurementValue').props.onChange({target:{value:'700.01'}});assert.equal(form.percent,'');assert.ok(nodes(render()).find(n=>n.type==='button'&&n.props.type==='submit').props.disabled);
 input('measurementValue').props.onChange({target:{value:''}});assert.equal(form.percent,'');
-form={...original,percent:50};assert.equal(input('measurementValue').props.value,'200.0000');
+form={...original,percent:50};assert.equal(input('measurementValue').props.value,'200.00');
 // Editing excludes the existing record from the prior balance.
 real.measurements.push({id:'edit',stageId:'s',endBp:5000,amountCents:20000,date:'2026-09-02'});
-assert.equal(nodes(render('measurements',{id:'edit'})).find(n=>n.type==='input'&&n.props.name==='measurementValue').props.value,'200.0000');
+assert.equal(nodes(render('measurements',{id:'edit'})).find(n=>n.type==='input'&&n.props.name==='measurementValue').props.value,'200.00');
 assert.equal(h.previewMeasurement('payment',10000000,undefined,0),null);
 for(const invalid of [NaN,Infinity,undefined,'',101,-1,30.00001])assert.equal(h.previewMeasurement('measurements',10000000,invalid,0),null);
 assert.equal(h.percentFromAmount(0,100,0),null);assert.equal(h.percentFromAmount(10000000,-1,0),null);assert.equal(h.percentFromAmount(10000000,0.00001,0),null);
-// Rounding and final balance use the same integer units with four decimal places as the server.
-assert.equal(h.percentFromAmount(10000100,700.007,3000030),100);
-assert.equal(h.previewMeasurement('measurements',10000100,100,3000030),7000070);
-const rounded=h.percentFromAmount(123456700,12.34,0);assert.equal(rounded,0.1);assert.equal(h.previewMeasurement('measurements',123456700,rounded,0),123457);
-// When the user types an amount, it is authoritative even if its derived 4-decimal percentage would recompute a slightly different value.
+// Monetary values close in cents while percentages retain four decimal places.
+assert.equal(h.percentFromAmount(10000100,700.01,3000000),100);
+assert.equal(h.previewMeasurement('measurements',10000100,100,3000000),7000100);
+const rounded=h.percentFromAmount(123456700,12.34,0);assert.equal(rounded,0.1);assert.equal(h.previewMeasurement('measurements',123456700,rounded,0),123500);
 const screenshotCase=h.resolveMeasurementInput('measurements','amount',48000000,62.5033,1000,20001600);assert.deepEqual(screenshotCase,{amountUnits:10000000,endP4:625033});
-assert.equal(h.previewMeasurement('measurements',48000000,62.5033,20001600),9999984);
+assert.equal(h.previewMeasurement('measurements',48000000,62.5033,20001600),10000000);
+assert.deepEqual(h.stageAllocationDrafts({contractUnits:10000000,alexUnits:3000000,pedreiroUnits:2000000},500000,[],5000000).map(x=>x.input),['250.00','150.00','100.00']);
+const priorSplit=[{stageId:'s',amountUnits:2000000,allocations:JSON.stringify([{name:'MA3',amountUnits:1000000,percentP4:500000},{name:'ALEX',amountUnits:600000,percentP4:300000},{name:'Pedreiro',amountUnits:400000,percentP4:200000}])}];
+assert.deepEqual(h.stageAllocationDrafts({contractUnits:10000000,alexUnits:3000000,pedreiroUnits:2000000},500000,priorSplit,3000000).map(x=>x.input),['150.00','90.00','60.00']);
 console.log('PASS: payment dialog regression, dynamic amount/percentage inputs, previous balance, editing, clearing, bounds and rounding.');
 
 const {AllocationEditor}=await import(allocationModule);
-let drafts=h.allocationDrafts(null,10000001),total=10000001;
+let drafts=h.allocationDrafts(null,10000000),total=10000000;
 const editor=()=>AllocationEditor({total,drafts,onChange:value=>drafts=value});
 const layerInput=name=>nodes(editor()).find(n=>n.type==='input'&&n.props.name===name);
 selected=0;layerInput('allocation-amount-0').props.onFocus({currentTarget:{select(){selected++}}});layerInput('allocation-percent-0').props.onFocus({currentTarget:{select(){selected++}}});assert.equal(selected,2);
 layerInput('allocation-amount-0').props.onChange({target:{value:'500.00'}});
-assert.equal(layerInput('allocation-percent-0').props.value,'50.0000');assert.equal(layerInput('allocation-amount-0').props.step,'0.0001');assert.equal(layerInput('allocation-percent-0').props.step,'0.0001');
+assert.equal(layerInput('allocation-percent-0').props.value,'50.0000');assert.equal(layerInput('allocation-amount-0').props.step,'0.01');assert.equal(layerInput('allocation-percent-0').props.step,'0.0001');
 layerInput('allocation-percent-1').props.onChange({target:{value:'30'}});
-assert.equal(layerInput('allocation-amount-1').props.value,'300.0000');
+assert.equal(layerInput('allocation-amount-1').props.value,'300.00');
 nodes(editor()).filter(n=>n.type==='button')[2].props.onClick();
-assert.equal(layerInput('allocation-amount-2').props.value,'200.0001');
+assert.equal(layerInput('allocation-amount-2').props.value,'200.00');
 let result=h.resolveAllocationDrafts(total,drafts);assert.ok(result.valid);assert.equal(result.valid.reduce((s,r)=>s+r.percentP4,0),1000000);assert.equal(result.sum,total);
 total=8000000;assert.equal(h.resolveAllocationDrafts(total,drafts).valid,null);
 layerInput('allocation-amount-0').props.onChange({target:{value:''}});assert.equal(h.resolveAllocationDrafts(total,drafts).valid,null);
-for(const invalid of ['-1','Infinity','0.00001','10000000000000000000']){drafts=[{mode:'amount',input:invalid},{mode:'amount',input:'0'},{mode:'amount',input:'0'}];assert.equal(h.resolveAllocationDrafts(100,drafts).valid,null)}
-for(const value of [1,2,3,101,100001,999999999999]){
+for(const invalid of ['-1','Infinity','0.001','10000000000000000000']){drafts=[{mode:'amount',input:invalid},{mode:'amount',input:'0'},{mode:'amount',input:'0'}];assert.equal(h.resolveAllocationDrafts(100,drafts).valid,null)}
+for(const value of [100,200,300,10100,100000,999999999900]){
  drafts=[{mode:'percent',input:'33.3333'},{mode:'percent',input:'33.3333'},{mode:'percent',input:'33.3334'}];
  const resolved=h.resolveAllocationDrafts(value,drafts);assert.ok(resolved.valid);assert.equal(resolved.sum,value);assert.equal(resolved.valid.reduce((s,r)=>s+r.percentP4,0),1000000);
 }
-total=3;drafts=[{mode:'percent',input:'33.3333'},{mode:'percent',input:'33.3333'},{mode:'percent',input:'33.3334'}];
+total=300;drafts=[{mode:'percent',input:'33.3333'},{mode:'percent',input:'33.3333'},{mode:'percent',input:'33.3334'}];
 layerInput('allocation-percent-2').props.onBlur();assert.equal(nodes(editor()).filter(n=>n.type==='input'&&n.props.name.startsWith('allocation-percent')).reduce((s,n)=>s+Math.round(Number(n.props.value)*10000),0),1000000);
 // The complete form blocks saving a balanced total until its three layers close.
 real.measurements=real.measurements.filter(m=>m.id!=='edit');form={...original,percent:50};
