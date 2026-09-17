@@ -61,8 +61,9 @@ export function resolveMeasurementInput(kind:string|undefined,mode:unknown,contr
 }
 
 export const allocationNames=['MA3','ALEX','Pedreiro'] as const;
-export type Allocation={name:typeof allocationNames[number];amountUnits:number;percentP4:number};
+export type Allocation={name:typeof allocationNames[number];amountUnits:number;percentP4:number;baseUnits?:number};
 export type AllocationDraft={mode:'amount'|'percent';input:string};
+export const stageAllocationBases=(stage:Row|undefined)=>stage?[contractUnits(stage),alexContractUnits(stage),pedreiroContractUnits(stage)]:[0,0,0];
 // Largest remainders close the four-decimal value and percentage units exactly.
 function apportion(total:number,weights:number[],denominator:number){
  const products=weights.map(w=>BigInt(total)*BigInt(w)),base=products.map(p=>Number(p/BigInt(denominator)));
@@ -78,8 +79,17 @@ export function validateAllocations(raw:unknown,total:number):Allocation[]|null{
  return allocationNames.map((name,i)=>({name,amountUnits:amounts[i],percentP4:percentages[i]}));
 }
 export function readAllocations(raw:unknown,total:number):Allocation[]|null{
- try{return validateAllocations(typeof raw==='string'?JSON.parse(raw):raw,total)}catch{return null}
+ try{
+  const parsed=typeof raw==='string'?JSON.parse(raw):raw;
+  if(Array.isArray(parsed)&&parsed.length===3&&parsed.every(row=>row&&Number.isSafeInteger(row.baseUnits)&&row.baseUnits>=0)){
+   const rows=allocationNames.map(name=>parsed.find(row=>row.name===name));
+   if(rows.some(row=>!row||!Number.isSafeInteger(row.amountUnits)||row.amountUnits<0||row.amountUnits%CENT_UNITS!==0||row.amountUnits>row.baseUnits))return null;
+   return rows.map(row=>({...row,percentP4:row.baseUnits?Math.round(row.amountUnits/row.baseUnits*PERCENT_TOTAL):0}));
+  }
+  return validateAllocations(parsed,total);
+ }catch{return null}
 }
+export function payableUnits(measurement:Row){const rows=readAllocations(measurement.allocations,amountUnits(measurement));return rows?.every(row=>row.baseUnits!==undefined)?rows.reduce((sum,row)=>sum+row.amountUnits,0):amountUnits(measurement)}
 export function allocationDrafts(raw:unknown,total:number):AllocationDraft[]{
  const rows=readAllocations(raw,total);return allocationNames.map((_,i)=>({mode:'amount',input:rows?(rows[i].amountUnits/VALUE_SCALE).toFixed(2):'0.00'}));
 }
@@ -94,13 +104,25 @@ export function resolveAllocationDrafts(total:number,drafts:AllocationDraft[]=[]
  const rows=allocationNames.map((name,i)=>({name,amountUnits:amounts[i],percentP4:valid?valid[i].percentP4:usable?Math.round((amounts[i]||0)/total*PERCENT_TOTAL):0}));
  return {rows,sum,remaining:usable?total-sum:0,valid};
 }
+export function resolveStageAllocationDrafts(bases:number[],drafts:AllocationDraft[]=[]){
+ const inputs=allocationNames.map((_,i)=>drafts[i]||{mode:'amount',input:''});
+ const rows=allocationNames.map((name,i)=>{const baseUnits=bases[i]||0,draft=inputs[i],value=Number(draft.input),scale=draft.mode==='percent'?PERCENT_SCALE:100,scaled=Math.round(value*scale),validInput=draft.input.trim()!==''&&Number.isFinite(value)&&value>=0&&Math.abs(value*scale-scaled)<1e-6&&value<=(draft.mode==='percent'?100:1e10);if(!validInput||!Number.isSafeInteger(baseUnits)||baseUnits<0)return {name,baseUnits,amountUnits:null,percentP4:0};const amount=draft.mode==='percent'?calculateMoneyUnits(baseUnits,scaled,0):scaled*CENT_UNITS,percentP4=draft.mode==='percent'?scaled:baseUnits?Math.round(amount/baseUnits*PERCENT_TOTAL):0;return {name,baseUnits,amountUnits:amount<=baseUnits?amount:null,percentP4}});
+ const valid=rows.every(row=>row.amountUnits!==null)?rows.map(row=>({...row,amountUnits:row.amountUnits as number})):null;
+ return {rows,sum:rows.reduce((sum,row)=>sum+(row.amountUnits||0),0),valid};
+}
+export function validateStageAllocations(raw:unknown,bases:number[],prior:Row[]=[]):Allocation[]|null{
+ if(!Array.isArray(raw)||raw.length!==3||bases.length!==3||bases.some(base=>!Number.isSafeInteger(base)||base<0))return null;
+ const previous=allocationNames.map(name=>prior.reduce((sum,measurement)=>sum+(readAllocations(measurement.allocations,amountUnits(measurement))?.find(row=>row.name===name)?.amountUnits||0),0));
+ const rows=allocationNames.map((name,i)=>{const matches=raw.filter((row:any)=>row&&row.name===name);if(matches.length!==1)return null;const amount=matches[0].amountUnits??(Number.isSafeInteger(matches[0].amountCents)?matches[0].amountCents*CENT_UNITS:NaN),baseUnits=bases[i];if(!Number.isSafeInteger(amount)||amount<0||amount%CENT_UNITS!==0||amount+previous[i]>baseUnits)return null;return {name,amountUnits:amount,baseUnits,percentP4:baseUnits?Math.round(amount/baseUnits*PERCENT_TOTAL):0}});
+ return rows.every(Boolean)?rows as Allocation[]:null;
+}
 export function stageAllocationDrafts(stage:Row|undefined,endP4:number,prior:Row[],total:number):AllocationDraft[]{
  if(!stage||!Number.isSafeInteger(endP4)||endP4<=0||!Number.isSafeInteger(total)||total<=0)return allocationDrafts(null,0);
  const paid=(name:string)=>prior.reduce((sum,m)=>sum+(readAllocations(m.allocations,amountUnits(m))?.find(r=>r.name===name)?.amountUnits||0),0);
  let alex=Math.max(0,cumulativeMoneyUnits(alexContractUnits(stage),endP4)-paid('ALEX'));
  let pedreiro=Math.max(0,cumulativeMoneyUnits(pedreiroContractUnits(stage),endP4)-paid('Pedreiro'));
- alex=Math.min(total,alex);pedreiro=Math.min(Math.max(0,total-alex),pedreiro);
- const amounts=[total-alex-pedreiro,alex,pedreiro];
+ alex=Math.min(Math.max(0,alexContractUnits(stage)-paid('ALEX')),alex);pedreiro=Math.min(Math.max(0,pedreiroContractUnits(stage)-paid('Pedreiro')),pedreiro);
+ const amounts=[total,alex,pedreiro];
  return amounts.map(value=>({mode:'amount',input:(value/VALUE_SCALE).toFixed(2)}));
 }
 export function weekRange(day:string){const d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()-(d.getUTCDay()+6)%7);const start=d.toISOString().slice(0,10);d.setUTCDate(d.getUTCDate()+6);return {start,end:d.toISOString().slice(0,10)}}

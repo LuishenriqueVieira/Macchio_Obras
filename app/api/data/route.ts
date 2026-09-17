@@ -2,7 +2,7 @@ import {requireUser} from '@/db/users';
 import {hasPermission} from '@/lib/permissions';
 import {z} from 'zod';
 import {database,failure,invalid} from '@/db/access';
-import {initialStages,normalizeMeasurements,stageLedger,contractUnits,amountUnits,endPercentUnits,resolveMeasurementInput,validateAllocations,readAllocations,VALUE_SCALE,PERCENT_SCALE} from '@/lib/measurement';
+import {initialStages,normalizeMeasurements,stageLedger,contractUnits,stageAllocationBases,amountUnits,endPercentUnits,resolveMeasurementInput,validateStageAllocations,readAllocations,VALUE_SCALE,PERCENT_SCALE} from '@/lib/measurement';
 const str=z.string().trim().max(1000),req=str.min(1);
 const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s=>!Number.isNaN(Date.parse(s))&&new Date(s).toISOString().slice(0,10)===s);
 const typeKey=(name:string)=>name.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
@@ -58,7 +58,7 @@ async function save(request:Request,editing:boolean){try{
   const prior=ledger.slice(0,-1),last=prior.at(-1),startP4=last?endPercentUnits(last):0,base=old.contractUnits??contractUnits(stage),resolved=resolveMeasurementInput('measurements',d.measurementInput,base,d.percent,d.measurementValue,prior.reduce((sum,m)=>sum+amountUnits(m),0)),endP4=resolved?.endP4??0;
   if(!resolved||endP4<=startP4||d.date<d.periodStart||(last&&d.periodStart<=last.date))return invalid('Confira o valor, o percentual e o período: a medição deve superar a anterior.');
   const amount=resolved.amountUnits;
-  const allocation=validateAllocations(d.allocations,amount);if(!allocation)return invalid('A soma de MA3, ALEX e Pedreiro deve fechar exatamente o valor da medição.');
+  const allocation=validateStageAllocations(d.allocations,stageAllocationBases(stage),prior);if(!allocation)return invalid('Confira os valores de MA3, ALEX e Pedreiro em relação às bases cadastradas.');
   const history=JSON.parse(old.editHistory||'[]');history.push({changedAt:new Date().toISOString(),actorId:user.id,previous:{periodStart:old.periodStart,date:old.date,startBp:old.startBp,endBp:old.endBp,startP4:old.startP4,endP4:old.endP4,amountCents:old.amountCents,amountUnits:old.amountUnits,contractUnits:old.contractUnits,allocations:old.allocations,notes:old.notes}});
   const result=await db.prepare('UPDATE measurements SET periodStart=?,date=?,startBp=?,endBp=?,startP4=?,endP4=?,amountCents=?,amountUnits=?,contractUnits=?,quantity=?,unitPrice=?,notes=?,editHistory=?,allocations=?,revision=revision+1 WHERE id=? AND revision=? AND paid=0 AND cancelledAt IS NULL AND id=(SELECT newer.id FROM measurements newer WHERE newer.stageId=measurements.stageId AND newer.cancelledAt IS NULL ORDER BY newer.date DESC,newer.rowid DESC LIMIT 1) RETURNING id').bind(d.periodStart,d.date,Math.round(startP4/100),Math.round(endP4/100),startP4,endP4,Math.round(amount/100),amount,base,(endP4-startP4)/PERCENT_SCALE,base/(VALUE_SCALE*100),d.notes,JSON.stringify(history),JSON.stringify(allocation),id,body.revision).all();
   if(!result.results.length)return invalid('A medição mudou. Atualize os dados.',409);
@@ -68,12 +68,12 @@ async function save(request:Request,editing:boolean){try{
   const base=contractUnits(s);if(base<=0||!s.contractor.trim())return invalid('Edite a etapa e informe o valor contratado e a empreiteira antes de medir.');
   const raw=await db.prepare('SELECT rowid AS sequence,* FROM measurements WHERE stageId=? AND id<>?').bind(s.id,id).all<any>();const ledger=stageLedger(normalizeMeasurements([s],raw.results),s.id),last=ledger.at(-1),startP4=last?endPercentUnits(last):0,resolved=resolveMeasurementInput('measurements',d.measurementInput,base,d.percent,d.measurementValue,ledger.reduce((t,m)=>t+amountUnits(m),0)),endP4=resolved?.endP4??0;
   if(!resolved)return invalid('Informe um valor ou percentual válido dentro do saldo disponível da etapa.');
-  const value=resolved.amountUnits;let allocation=duplicate?validateAllocations(d.allocations,value):null;
+  const value=resolved.amountUnits;let allocation=duplicate?validateStageAllocations(d.allocations,stageAllocationBases(s),ledger):null;
   if(duplicate){if(allocation&&endPercentUnits(duplicate)===endP4&&amountUnits(duplicate)===value&&duplicate.date===d.date&&duplicate.periodStart===d.periodStart&&duplicate.notes===d.notes&&JSON.stringify(readAllocations(duplicate.allocations,value))===JSON.stringify(allocation))return Response.json({id});return invalid('Identificador já utilizado. Abra uma nova medição.',409)}
   if((last?.id||'')!==d.previousId)return invalid('Outra medição foi lançada. Atualize os dados antes de continuar.',409);
   if(endP4<=startP4)return invalid('O percentual acumulado deve superar o anterior e não pode passar de 100%.');
   if(d.date<d.periodStart||(last&&d.periodStart<=last.date))return invalid('O período deve começar depois da última medição e terminar na data final ou depois do início.');
-  allocation=validateAllocations(d.allocations,value);if(!allocation)return invalid('A soma de MA3, ALEX e Pedreiro deve fechar exatamente o valor da medição.');
+  allocation=validateStageAllocations(d.allocations,stageAllocationBases(s),ledger);if(!allocation)return invalid('Confira os valores de MA3, ALEX e Pedreiro em relação às bases cadastradas.');
   const r=await db.prepare(`INSERT INTO measurements(id,projectId,stageId,date,quantity,unitPrice,notes,periodStart,startBp,endBp,startP4,endP4,amountCents,contractCents,amountUnits,contractUnits,stageName,contractor,createdAt,allocations) SELECT ?,projectId,id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, name,contractor, ?, ? FROM stages WHERE id=? AND COALESCE(contractUnits,COALESCE(contractCents,ROUND(quantity*price*100))*100)=? AND name=? AND contractor=? AND COALESCE((SELECT id FROM measurements WHERE stageId=? AND cancelledAt IS NULL ORDER BY date DESC,rowid DESC LIMIT 1),'')=? RETURNING id`).bind(id,d.date,(endP4-startP4)/PERCENT_SCALE,base/(VALUE_SCALE*100),d.notes,d.periodStart,Math.round(startP4/100),Math.round(endP4/100),startP4,endP4,Math.round(value/100),Math.round(base/100),value,base,new Date().toISOString(),JSON.stringify(allocation),s.id,base,s.name,s.contractor,s.id,d.previousId).all();
   if(!r.results.length)return invalid('Os dados da etapa mudaram. Atualize antes de salvar.',409);
  }else if(kind==='stages'){
