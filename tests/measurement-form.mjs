@@ -41,6 +41,7 @@ const rounded=h.percentFromAmount(123456700,12.34,0);assert.equal(rounded,0.1);a
 const screenshotCase=h.resolveMeasurementInput('measurements','amount',48000000,62.5033,1000,20001600);assert.deepEqual(screenshotCase,{amountUnits:10000000,endP4:625033});
 assert.equal(h.previewMeasurement('measurements',48000000,62.5033,20001600),10000000);
 assert.deepEqual(h.stageAllocationDrafts({contractUnits:10000000,alexUnits:3000000,pedreiroUnits:2000000},500000,[],5000000).map(x=>x.input),['500.00','150.00','100.00']);
+assert.deepEqual(h.stageAllocationDrafts({contractUnits:1000000,alexUnits:6000000,pedreiroUnits:5000000},500000,[],500000).map(x=>x.input),['50.00','300.00','250.00']);
 const priorSplit=[{stageId:'s',amountUnits:2000000,allocations:JSON.stringify([{name:'MA3',amountUnits:1000000,percentP4:500000},{name:'ALEX',amountUnits:600000,percentP4:300000},{name:'Pedreiro',amountUnits:400000,percentP4:200000}])}];
 assert.deepEqual(h.stageAllocationDrafts({contractUnits:10000000,alexUnits:3000000,pedreiroUnits:2000000},500000,priorSplit,3000000).map(x=>x.input),['300.00','90.00','60.00']);
 const newAllocation=JSON.stringify([{name:'MA3',amountUnits:5000000,baseUnits:10000000,percentP4:500000},{name:'ALEX',amountUnits:1800000,baseUnits:6000000,percentP4:300000},{name:'Pedreiro',amountUnits:1000000,baseUnits:4000000,percentP4:250000}]);
