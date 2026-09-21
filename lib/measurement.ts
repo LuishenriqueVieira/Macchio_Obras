@@ -24,6 +24,13 @@ export function normalizeMeasurements(stages:Row[],rows:Row[]){
  });
 }
 export function stageLedger(rows:Row[],id:string){return rows.filter(m=>m.stageId===id&&!m.cancelledAt).sort((a,b)=>a.date.localeCompare(b.date)||(a.sequence||0)-(b.sequence||0))}
+export function canEditMeasurement(rows:Row[],row:Row){
+ if(row.paid||row.cancelledAt)return false;
+ const ledger=stageLedger(rows,row.stageId),position=ledger.findIndex(m=>m.id===row.id);
+ if(position<0)return false;
+ const next=ledger[position+1];
+ return !next?.paid;
+}
 export function calculateCents(contract:number,endBp:number,already:number){return Number((BigInt(Math.round(contract))*BigInt(Math.round(endBp))+BigInt(5000))/BigInt(10000))-already}
 export function calculateUnits(contract:number,endP4:number,already:number){return Number((BigInt(Math.round(contract))*BigInt(Math.round(endP4))+BigInt(PERCENT_TOTAL/2))/BigInt(PERCENT_TOTAL))-already}
 export function cumulativeMoneyUnits(contract:number,endP4:number){const cents=Math.round(contract/CENT_UNITS);return Number((BigInt(cents)*BigInt(Math.round(endP4))+BigInt(PERCENT_TOTAL/2))/BigInt(PERCENT_TOTAL))*CENT_UNITS}
