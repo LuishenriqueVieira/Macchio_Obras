@@ -94,5 +94,17 @@ assert.equal(sql.prepare('SELECT allocations FROM measurements WHERE id=?').get(
 sql.prepare('UPDATE measurements SET allocations=NULL WHERE id=?').run(final.id);
 await request('PATCH',{action:'payment',id:final.id,paid:true,paidAt:'2026-10-08',revision:0});
 assert.equal(sql.prepare('SELECT allocations FROM measurements WHERE id=?').get(final.id).allocations,null);
+const batchStageA=await create('stages',{projectId:project.id,stageTypeId:customType.id,name:'Lote etapa A',contractValue:1000,alexValue:500,pedreiroValue:400,contractor:'Empreiteira Lote',start:'2026-12-01',end:'2026-12-31'});
+const batchStageB=await create('stages',{projectId:project.id,stageTypeId:customType.id,name:'Lote etapa B',contractValue:2000,alexValue:800,pedreiroValue:600,contractor:'Empreiteira Lote',start:'2026-12-01',end:'2026-12-31'});
+const batchItem=(stageId,percent,allocations)=>({requestId:crypto.randomUUID(),stageId,percent,measurementInput:'percent',previousId:'',periodStart:'2026-12-01',date:'2026-12-07',notes:'Medição em lote',allocations});
+const batchPayload={action:'measurements.batch',projectId:project.id,items:[batchItem(batchStageA.id,25,split(2500000,1250000,1000000)),batchItem(batchStageB.id,10,split(2000000,800000,600000))]};
+const batchResult=await request('POST',batchPayload,201);assert.equal(batchResult.ids.length,2);assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM measurements WHERE id IN (?,?)').get(...batchResult.ids).n,2);
+const batchReplay=await request('POST',batchPayload);assert.equal(batchReplay.repeated,true);assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM measurements WHERE id IN (?,?)').get(...batchResult.ids).n,2);
+const invalidStageA=await create('stages',{projectId:project.id,stageTypeId:customType.id,name:'Lote inválido A',contractValue:1000,alexValue:500,pedreiroValue:400,contractor:'Empreiteira Lote',start:'2026-12-01',end:'2026-12-31'});
+const invalidStageB=await create('stages',{projectId:project.id,stageTypeId:customType.id,name:'Lote inválido B',contractValue:1000,alexValue:500,pedreiroValue:400,contractor:'Empreiteira Lote',start:'2026-12-01',end:'2026-12-31'});
+const invalidBatch={action:'measurements.batch',projectId:project.id,items:[batchItem(invalidStageA.id,10,split(1000000,500000,400000)),batchItem(invalidStageB.id,10,split(1000001,500000,400000))]};
+await request('POST',invalidBatch,400);assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM measurements WHERE stageId IN (?,?)').get(invalidStageA.id,invalidStageB.id).n,0);
+const duplicate=batchItem(invalidStageA.id,10,split(1000000,500000,400000));await request('POST',{action:'measurements.batch',projectId:project.id,items:[duplicate,{...duplicate,requestId:crypto.randomUUID()}]},400);assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM measurements WHERE stageId=?').get(invalidStageA.id).n,0);
 console.log('PASS: independent party bases, invalid limits, two-decimal values, four-decimal percentages, persistence, idempotency, edit audit, concurrency, paid protection and legacy preservation.');
+console.log('PASS: multi-stage measurement batches, unique stages, atomic validation and idempotent retries.');
 sql.close();

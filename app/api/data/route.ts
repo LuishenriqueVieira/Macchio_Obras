@@ -17,8 +17,45 @@ const schemas={
  measurements:z.object({requestId:z.string().uuid(),stageId:req,periodStart:date,date,percent:z.number().finite().positive().max(100).refine(v=>Math.abs(v*PERCENT_SCALE-Math.round(v*PERCENT_SCALE))<1e-6,{message:'Use até quatro casas após a vírgula no percentual.'}),measurementInput:z.enum(['percent','amount']).default('percent'),measurementValue:decimal2(1e10,'valor da medição').optional(),previousId:str,notes:str,allocations:z.array(allocation,{required_error:'Atualize a página e distribua a medição entre MA3, ALEX e Pedreiro.'}).length(3,{message:'Informe MA3, ALEX e Pedreiro.'})}).refine(d=>d.measurementInput!=='amount'||(d.measurementValue!==undefined&&d.measurementValue>0),{message:'Informe um valor positivo para a medição.',path:['measurementValue']})
 };
 const kinds=Object.keys(schemas);
+const measurementBatchSchema=z.object({projectId:req,items:z.array(schemas.measurements).min(1,{message:'Adicione pelo menos uma etapa.'}).max(20,{message:'Adicione no máximo 20 etapas por medição.'})});
 const measurementSnapshot=(m:any)=>({periodStart:m.periodStart,date:m.date,startBp:m.startBp,endBp:m.endBp,startP4:m.startP4,endP4:m.endP4,amountCents:m.amountCents,amountUnits:m.amountUnits,contractUnits:m.contractUnits,allocations:m.allocations,notes:m.notes});
 const allocationAmounts=(m:any)=>readAllocations(m.allocations,amountUnits(m))?.map(row=>row.amountUnits)||null;
+async function saveMeasurementBatch(request:Request,body:any,db:ReturnType<typeof database>){
+ await requireUser(request,'measurements.edit');
+ const parsed=measurementBatchSchema.safeParse(body);if(!parsed.success)return invalid(parsed.error.issues[0]?.message||'Confira as etapas da medição.');
+ const {projectId,items}=parsed.data,stageIds=items.map(item=>item.stageId),requestIds=items.map(item=>item.requestId);
+ if(new Set(stageIds).size!==items.length)return invalid('Cada etapa pode aparecer apenas uma vez na mesma medição.');
+ if(new Set(requestIds).size!==items.length)return invalid('Atualize o cadastro e tente novamente.');
+ const prepared:any[]=[];
+ for(const d of items){
+  const stage:any=await db.prepare('SELECT * FROM stages WHERE id=? AND projectId=?').bind(d.stageId,projectId).first();if(!stage)return invalid('Selecione etapas pertencentes à obra informada.');
+  const existing:any=await db.prepare('SELECT * FROM measurements WHERE id=?').bind(d.requestId).first();
+  const raw=await db.prepare('SELECT rowid AS sequence,* FROM measurements WHERE stageId=? AND id<>?').bind(stage.id,d.requestId).all<any>(),ledger=stageLedger(normalizeMeasurements([stage],raw.results),stage.id),last=ledger.at(-1),startP4=last?endPercentUnits(last):0,base=contractUnits(stage),resolved=resolveMeasurementInput('measurements',d.measurementInput,base,d.percent,d.measurementValue,ledger.reduce((sum,row)=>sum+amountUnits(row),0)),endP4=resolved?.endP4??0;
+  if(base<=0||!stage.contractor.trim())return invalid(`Informe a empreiteira e a base MA3 da etapa ${stage.name} antes de medir.`);
+  if(!resolved||endP4<=startP4)return invalid(`O avanço da etapa ${stage.name} deve superar o acumulado anterior sem passar de 100%.`);
+  if(d.date<d.periodStart||(last&&d.periodStart<=last.date)||(last?.id||'')!==d.previousId)return invalid(`Confira o período da etapa ${stage.name}; outra medição pode ter sido lançada.` ,409);
+  const allocation=validateStageAllocations(d.allocations,stageAllocationBases(stage),ledger);if(!allocation)return invalid(`Confira os valores de MA3, ALEX e Pedreiro da etapa ${stage.name}.`);
+  const amount=resolved.amountUnits,createdAt=new Date().toISOString();
+  prepared.push({d,stage,existing,startP4,endP4,base,amount,allocation,createdAt});
+ }
+ const existingCount=prepared.filter(row=>row.existing).length;
+ if(existingCount){
+  const repeated=existingCount===prepared.length&&prepared.every(({d,existing,startP4,endP4,amount,allocation})=>existing.stageId===d.stageId&&existing.periodStart===d.periodStart&&existing.date===d.date&&existing.notes===d.notes&&startPercentUnits(existing)===startP4&&endPercentUnits(existing)===endP4&&amountUnits(existing)===amount&&JSON.stringify(readAllocations(existing.allocations,amount))===JSON.stringify(allocation));
+  if(repeated)return Response.json({ids:requestIds,repeated:true});
+  return invalid('Um destes lançamentos já foi utilizado. Atualize os dados antes de continuar.',409);
+ }
+ const columns=['id','expectedProjectId','stageId','date','quantity','unitPrice','notes','periodStart','startBp','endBp','startP4','endP4','amountCents','contractCents','amountUnits','contractUnits','createdAt','allocations','expectedName','expectedContractor','previousId'];
+ const tuple='('+columns.map(()=>'?').join(',')+')',values:any[]=[];
+ for(const {d,stage,startP4,endP4,base,amount,allocation,createdAt} of prepared)values.push(d.requestId,projectId,stage.id,d.date,(endP4-startP4)/PERCENT_SCALE,base/(VALUE_SCALE*100),d.notes,d.periodStart,Math.round(startP4/100),Math.round(endP4/100),startP4,endP4,Math.round(amount/100),Math.round(base/100),amount,base,createdAt,JSON.stringify(allocation),stage.name,stage.contractor,d.previousId);
+ const sql=`WITH input(${columns.join(',')}) AS (VALUES ${prepared.map(()=>tuple).join(',')}), ready AS (
+  SELECT input.*,stages.projectId,CASE WHEN stages.id IS NOT NULL AND stages.projectId=input.expectedProjectId AND COALESCE(stages.contractUnits,COALESCE(stages.contractCents,ROUND(stages.quantity*stages.price*100))*100)=input.contractUnits AND stages.name=input.expectedName AND stages.contractor=input.expectedContractor AND COALESCE((SELECT id FROM measurements latest WHERE latest.stageId=input.stageId AND latest.cancelledAt IS NULL ORDER BY latest.date DESC,latest.rowid DESC LIMIT 1),'')=input.previousId THEN 1 ELSE 0 END AS valid
+  FROM input LEFT JOIN stages ON stages.id=input.stageId
+ ), checked AS (SELECT ready.*,SUM(valid) OVER () AS validCount FROM ready)
+ INSERT INTO measurements(id,projectId,stageId,date,quantity,unitPrice,notes,periodStart,startBp,endBp,startP4,endP4,amountCents,contractCents,amountUnits,contractUnits,stageName,contractor,createdAt,allocations)
+ SELECT id,CASE WHEN validCount=? THEN projectId ELSE NULL END,stageId,date,quantity,unitPrice,notes,periodStart,startBp,endBp,startP4,endP4,amountCents,contractCents,amountUnits,contractUnits,expectedName,expectedContractor,createdAt,allocations FROM checked RETURNING id`;
+ try{const result=await db.prepare(sql).bind(...values,prepared.length).all<any>();if(result.results.length!==prepared.length)return invalid('As etapas mudaram. Atualize os dados antes de salvar.',409)}catch{return invalid('As etapas mudaram. Atualize os dados antes de salvar.',409)}
+ return Response.json({ids:requestIds},{status:201});
+}
 async function initialize(db:ReturnType<typeof database>){
  await db.batch([...initialStages.map((name,i)=>db.prepare("INSERT OR IGNORE INTO stageTypes(id,name,nameKey,description) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM systemSettings WHERE id='stage-types-initialized')").bind('default-type-'+i,name,typeKey(name),'')),db.prepare("INSERT OR IGNORE INTO systemSettings(id,value) VALUES('stage-types-initialized','1')")]);
  const defaults=(await db.prepare("SELECT * FROM stageTypes WHERE id LIKE 'default-type-%' ORDER BY rowid").all<any>()).results;
@@ -30,6 +67,7 @@ export async function GET(request:Request){try{const user=await requireUser(requ
 async function save(request:Request,editing:boolean){try{
  const user=await requireUser(request);const body:any=await request.json(),db=database();
  if(body.action==='initialize'&&!editing){if(hasPermission(user,'projects.edit')||hasPermission(user,'stageTypes.edit'))await initialize(db);return Response.json({ok:true})}
+ if(body.action==='measurements.batch'&&!editing)return await saveMeasurementBatch(request,body,db);
  if(body.action==='payment'&&editing){
   await requireUser(request,'payments.edit');
   const parsed=z.object({id:req,paid:z.boolean(),paidAt:date.nullable(),revision:z.number().int().min(0)}).safeParse(body);if(!parsed.success)return invalid('Confira os dados do pagamento.');

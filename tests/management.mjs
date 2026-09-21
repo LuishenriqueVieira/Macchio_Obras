@@ -31,6 +31,7 @@ const form=new FormData();form.set('file',new File(['%PDF-test'],'teste.pdf',{ty
 // A consulta não dá direito a editar ou excluir; liberação de exclusão é independente.
 globalThis.currentUser={id:'viewer',active:true,role:'custom',permissions:['projects.view','stageTypes.view','stages.view','measurements.view','documents.view','engineers.view','teams.view']};
 for(const kind of ['projects','stageTypes','stages','measurements','engineers','teams']){await req('POST',{kind,data:{}},403);await del(kind,kind==='measurements'?first.id:'missing',403)}
+await req('POST',{action:'measurements.batch',projectId:project.id,items:[]},403);
 await req('PATCH',{id:document.id,name:'x',category:'Contrato',projectId:project.id},403,docs);await req('DELETE',{id:document.id},403,docs);
 globalThis.currentUser={id:'editor',active:true,role:'custom',permissions:['teams.edit']};await del('teams',team.id,403);
 globalThis.currentUser.permissions=['teams.delete'];await del('teams',team.id);await req('POST',{kind:'teams',data:{}},403);
