@@ -1,14 +1,14 @@
 import {z} from 'zod';
 import {database,failure,invalid,checkOrigin} from '@/db/access';
-import {currentUser,requireUser,publicUser,ownerSetup} from '@/db/users';
+import {currentUser,requireUser,publicUser,ownerSetup,ownerRecovery} from '@/db/users';
 import {hashPassword,validPassword,normalizeUsername,validUsername,sessionCookie,sessionToken} from '@/db/passwords';
 import {expandPermissions,hasPermission,privileges,presets} from '@/lib/permissions';
 const schema=z.object({name:z.string().trim().min(1).max(150),email:z.string().trim().email().max(254).transform(s=>s.toLowerCase()),username:z.string().transform(normalizeUsername).refine(validUsername),role:z.enum(['admin','engineer','viewer','custom']),active:z.boolean(),permissions:z.array(z.string()).max(privileges.length).refine(p=>p.every(k=>privileges.includes(k)))});
 const safeHeaders={'Cache-Control':'private, no-store'};
 export async function GET(request:Request){try{
  checkOrigin(request);const user=await currentUser(request);let users:any[]=[];if(hasPermission(user,'users.manage'))users=(await database().prepare('SELECT * FROM appUsers WHERE deletedAt IS NULL ORDER BY createdAt DESC').all()).results.map(publicUser);
- const setup=user?null:await ownerSetup(request),pending=await database().prepare("SELECT id FROM appUsers WHERE id='owner' AND active=1 AND passwordHash IS NULL").first();
- return Response.json({user,users,setup:setup?{name:setup.name,username:setup.username}:null,needsOwnerSetup:!!pending},{headers:{...safeHeaders,...(user?{'Set-Cookie':sessionCookie(request,sessionToken(request))}:{})}});
+ const setup=user?null:await ownerSetup(request),recovery=user?null:await ownerRecovery(request),pending=await database().prepare("SELECT id FROM appUsers WHERE id='owner' AND active=1 AND passwordHash IS NULL").first();
+ return Response.json({user,users,setup:setup?{name:setup.name,username:setup.username}:null,ownerRecovery:!setup&&recovery?{name:recovery.name,username:recovery.username}:null,needsOwnerSetup:!!pending},{headers:{...safeHeaders,...(user?{'Set-Cookie':sessionCookie(request,sessionToken(request))}:{})}});
 }catch(e){return failure(e)}}
 export async function POST(request:Request){try{
  const admin=await requireUser(request,'users.manage'),body:any=await request.json(),db=database(),now=new Date().toISOString();

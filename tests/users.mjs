@@ -63,4 +63,10 @@ for(let i=0;i<10;i++)await login(null,'attempts',pass,401);await login(null,'att
 assert.equal(sql.prepare('SELECT COUNT(*) count FROM userAudit').get().count,7);assert.ok(expandPermissions(['payments.edit']).includes('projects.view'));
 const deleting=await req(api,'POST','owner',{data:{...person,email:'delete@example.com',username:'delete-me'}},201);await login('delete-session','delete-me');
 await req(api,'DELETE','delete-session',{id:deleting.id},403);await req(api,'DELETE','owner',{id:'owner'},403);await req(api,'DELETE','owner',{id:deleting.id});await req(data,'GET','delete-session',null,401);await login(null,'delete-me',pass,401);assert.ok(!(await req(api,'GET','owner')).users.some(u=>u.id===deleting.id));await req(api,'PATCH','owner',{id:deleting.id,revision:1,data:person},404);
+const recovery=await req(api,'GET',null,null,200,{'oai-authenticated-user-id':'owner-stable-id'});assert.equal(recovery.ownerRecovery.username,'owner');
+await req(auth,'POST',null,{action:'recover-owner',username:'master',password:'24681357'},403,{'oai-authenticated-user-id':'wrong'});
+for(const password of ['123456789','1234a678',''])await req(auth,'POST',null,{action:'recover-owner',username:'master',password},400,{'oai-authenticated-user-id':'owner-stable-id'});
+await req(auth,'POST','master-recovery',{action:'recover-owner',username:'master',password:'24681357'},200,{'oai-authenticated-user-id':'owner-stable-id'});
+await req(data,'GET','owner2',null,401);await req(data,'GET','master-recovery');await login(null,'owner',next,401);await login('master-login','master','24681357');
+assert.equal(sql.prepare("SELECT action FROM userAudit WHERE userId='owner' ORDER BY createdAt DESC LIMIT 1").get().action,'Conta master recuperada via ChatGPT');
 console.log('PASS: primeira senha restrita ao titular; login sem ChatGPT; cookies e hashes; conta sem expiração; privilégios e documentos; bloqueio de sessões por desativação e senha; reativação sem reviver sessões; logout; duplicidade; CSRF; limitação de tentativas; proteção do administrador; auditoria.');sql.close();
