@@ -43,5 +43,13 @@ assert.deepEqual(pending.totals,{MA3:units(100),ALEX:units(50),Pedreiro:units(25
 const beta=finance.summarizeFinance(measurements,projects,{start:'2026-09-14',end:'2026-09-20',status:'all',projectId:'p2'});
 assert.equal(beta.total,units(380));
 assert.equal(beta.byProject[0].name,'Obra Beta');
-console.log('PASS: períodos diário, semanal, mensal e anual, totais por MA3/ALEX/Pedreiro, pagos, pendentes e detalhamento por obra.');
-
+const alexOnly=finance.summarizeFinance(measurements,projects,{start:'2026-09-14',end:'2026-09-20',status:'all',parties:['ALEX']});
+assert.equal(alexOnly.rows.length,2);
+assert.deepEqual(alexOnly.totals,{MA3:0,ALEX:units(150),Pedreiro:0});
+assert.equal(alexOnly.total,units(150));
+assert.equal(alexOnly.paidTotal,units(100));
+assert.equal(alexOnly.pendingTotal,units(50));
+const ma3AndPedreiro=finance.summarizeFinance(measurements,projects,{start:'2026-09-14',end:'2026-09-20',status:'all',parties:['MA3','Pedreiro']});
+assert.deepEqual(ma3AndPedreiro.totals,{MA3:units(600),ALEX:0,Pedreiro:units(105)});
+assert.equal(ma3AndPedreiro.total,units(705));
+console.log('PASS: períodos diário, semanal, mensal e anual, filtro individual e múltiplo por empresa, pagos, pendentes e detalhamento por obra.');

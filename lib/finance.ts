@@ -42,16 +42,22 @@ const zero=():PartyTotals=>({MA3:0,ALEX:0,Pedreiro:0});
 const add=(target:PartyTotals,value:PartyTotals)=>{for(const party of financeParties)target[party]+=value[party]};
 export const totalUnits=(totals:PartyTotals)=>financeParties.reduce((sum,party)=>sum+totals[party],0);
 
-export function summarizeFinance(measurements:Row[],projects:Row[],options:{start:string;end:string;status:FinanceStatus;projectId?:string}){
+export function summarizeFinance(measurements:Row[],projects:Row[],options:{start:string;end:string;status:FinanceStatus;projectId?:string;parties?:PartyName[]}){
+ const selectedParties=options.parties??financeParties;
+ const selectedValues=(row:Row)=>{
+  const values=financialUnits(row);
+  return Object.fromEntries(financeParties.map(party=>[party,selectedParties.includes(party)?values[party]:0])) as PartyTotals;
+ };
  const allRows=measurements.filter(row=>!row.cancelledAt&&row.date>=options.start&&row.date<=options.end&&(!options.projectId||row.projectId===options.projectId));
- const rows=allRows.filter(row=>options.status==='all'||(options.status==='paid'?!!row.paid:!row.paid));
+ const valuedRows=allRows.filter(row=>totalUnits(selectedValues(row))>0);
+ const rows=valuedRows.filter(row=>options.status==='all'||(options.status==='paid'?!!row.paid:!row.paid));
  const totals=zero(),paid=zero(),pending=zero();
- for(const row of allRows){const values=financialUnits(row);add(row.paid?paid:pending,values)}
- for(const row of rows)add(totals,financialUnits(row));
+ for(const row of valuedRows){const values=selectedValues(row);add(row.paid?paid:pending,values)}
+ for(const row of rows)add(totals,selectedValues(row));
  const byProject=[...new Set(rows.map(row=>row.projectId))].map(projectId=>{
   const list=rows.filter(row=>row.projectId===projectId).sort((a,b)=>b.date.localeCompare(a.date));
   const projectTotals=zero(),projectPaid=zero(),projectPending=zero();
-  for(const row of list){const values=financialUnits(row);add(projectTotals,values);add(row.paid?projectPaid:projectPending,values)}
+  for(const row of list){const values=selectedValues(row);add(projectTotals,values);add(row.paid?projectPaid:projectPending,values)}
   return {projectId,name:projects.find(project=>project.id===projectId)?.name||'Obra não identificada',rows:list,totals:projectTotals,paid:projectPaid,pending:projectPending};
  }).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
  return {rows,totals,paid,pending,byProject,total:totalUnits(totals),paidTotal:totalUnits(paid),pendingTotal:totalUnits(pending),displayValue:(units:number)=>units/VALUE_SCALE};
