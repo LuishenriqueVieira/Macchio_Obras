@@ -1,0 +1,35 @@
+"use client";
+import {useMemo,useState} from 'react';
+import {CalendarDays,ChevronLeft,ChevronRight,Wallet,Building2,ReceiptText} from 'lucide-react';
+import {Choice,Blank} from './obras-ui';
+import {money,dateLabel,today,type Row} from '@/lib/obras';
+import {financeParties,financeRange,financialUnits,shiftFinanceAnchor,summarizeFinance,totalUnits,type FinancePeriod,type FinanceStatus} from '@/lib/finance';
+import {VALUE_SCALE} from '@/lib/measurement';
+import {Table,TableHeader,TableBody,TableRow,TableHead,TableCell} from '@/components/ui/table';
+
+const periodLabels:Record<FinancePeriod,string>={day:'Dia',week:'Semana',month:'Mês',year:'Ano'};
+const statusOptions=[['all','Pagos e a pagar'],['pending','A pagar'],['paid','Pagos']];
+
+export function FinancePanel({data}:any){
+ const [period,setPeriod]=useState<FinancePeriod>('week'),[anchor,setAnchor]=useState(today()),[status,setStatus]=useState<FinanceStatus>('all'),[projectId,setProjectId]=useState('');
+ const range=financeRange(period,anchor);
+ const summary=useMemo(()=>summarizeFinance(data.measurements,data.projects,{...range,status,projectId:projectId||undefined}),[data,range.start,range.end,status,projectId]);
+ const years=[...new Set([anchor.slice(0,4),...data.measurements.map((row:Row)=>row.date?.slice(0,4)).filter(Boolean)])].sort().reverse();
+ const periodValue=period==='month'?anchor.slice(0,7):period==='year'?anchor.slice(0,4):anchor;
+ function updatePeriodValue(value:string){if(period==='month')setAnchor(value+'-01');else if(period==='year')setAnchor(value+'-01-01');else setAnchor(value)}
+ const selectedLabel=status==='paid'?'pagos':status==='pending'?'a pagar':'financeiros';
+ return <section className="finance-panel">
+  <section className="panel finance-filters">
+   <div className="section-heading"><div><h2>Visão financeira</h2><p>Consulte medições pagas e pendentes pela data final do lançamento.</p></div><span className="finance-range"><CalendarDays size={17}/>{dateLabel(range.start)} a {dateLabel(range.end)}</span></div>
+   <div className="finance-periods" role="group" aria-label="Tipo de período">{(Object.keys(periodLabels) as FinancePeriod[]).map(key=><button key={key} className={period===key?'active':''} aria-pressed={period===key} onClick={()=>setPeriod(key)}>{periodLabels[key]}</button>)}</div>
+   <div className="finance-filter-grid">
+    <div className="finance-anchor"><button className="icon-button" title="Período anterior" onClick={()=>setAnchor(shiftFinanceAnchor(period,anchor,-1))}><ChevronLeft size={18}/></button><label>{period==='day'?'Data':period==='week'?'Semana de referência':period==='month'?'Mês':'Ano'}{period==='year'?<select value={periodValue} onChange={e=>updatePeriodValue(e.target.value)}>{years.map(year=><option key={year} value={year}>{year}</option>)}</select>:<input type={period==='month'?'month':'date'} value={periodValue} onChange={e=>updatePeriodValue(e.target.value)}/>}</label><button className="icon-button" title="Próximo período" onClick={()=>setAnchor(shiftFinanceAnchor(period,anchor,1))}><ChevronRight size={18}/></button></div>
+    <label>Situação<Choice label="Situação financeira" value={status} onChange={setStatus} options={statusOptions}/></label>
+    <label>Obra<Choice label="Filtrar por obra" value={projectId} onChange={setProjectId} options={[["","Todas as obras"],...data.projects.map((project:Row)=>[project.id,project.name])]}/></label>
+    <button className="secondary finance-today" onClick={()=>setAnchor(today())}>Período atual</button>
+   </div>
+  </section>
+  <div className="finance-cards">{financeParties.map((party,index)=>{const Icon=index===0?Wallet:index===1?ReceiptText:Building2;return <article key={party} className={'finance-card party-'+party.toLowerCase()}><div><span>{party}</span><Icon size={20}/></div><strong>{money(summary.totals[party]/VALUE_SCALE)}</strong><dl><div><dt>Pago</dt><dd>{money(summary.paid[party]/VALUE_SCALE)}</dd></div><div><dt>A pagar</dt><dd>{money(summary.pending[party]/VALUE_SCALE)}</dd></div></dl></article>})}<article className="finance-card finance-total"><div><span>Total selecionado</span><Wallet size={20}/></div><strong>{money(summary.total/VALUE_SCALE)}</strong><dl><div><dt>Pago</dt><dd>{money(summary.paidTotal/VALUE_SCALE)}</dd></div><div><dt>A pagar</dt><dd>{money(summary.pendingTotal/VALUE_SCALE)}</dd></div></dl></article></div>
+  <section className="panel finance-breakdown"><div className="section-heading"><div><h2>Valores por obra</h2><p>{summary.rows.length} {summary.rows.length===1?'medição':'medições'} com valores {selectedLabel} no período selecionado.</p></div><strong>{money(summary.total/VALUE_SCALE)}</strong></div>{!summary.byProject.length?<Blank title="Nenhum valor neste período" description="Altere o período, a situação ou a obra selecionada." icon={Wallet}/>:<div className="finance-projects">{summary.byProject.map(group=><details key={group.projectId} open={summary.byProject.length===1}><summary><span className="finance-project-name"><Building2 size={18}/><span><strong>{group.name}</strong><small>{group.rows.length} {group.rows.length===1?'medição':'medições'}</small></span></span>{financeParties.map(party=><span key={party}><small>{party}</small><strong>{money(group.totals[party]/VALUE_SCALE)}</strong></span>)}<span className="finance-project-total"><small>Total</small><strong>{money(totalUnits(group.totals)/VALUE_SCALE)}</strong></span></summary><div className="finance-project-meta"><span>Pago: <strong>{money(totalUnits(group.paid)/VALUE_SCALE)}</strong></span><span>A pagar: <strong>{money(totalUnits(group.pending)/VALUE_SCALE)}</strong></span></div><Table><TableHeader><TableRow><TableHead>Data / etapa</TableHead><TableHead>Situação</TableHead>{financeParties.map(party=><TableHead key={party}>{party}</TableHead>)}<TableHead>Total</TableHead></TableRow></TableHeader><TableBody>{group.rows.map((row:Row)=>{const values=financialUnits(row);return <TableRow key={row.id}><TableCell><strong>{dateLabel(row.date)}</strong><small className="cell-subtitle">{row.stageName||data.stages.find((stage:Row)=>stage.id===row.stageId)?.name||'Etapa'}</small></TableCell><TableCell><span className={'status '+(row.paid?'green':'orange')}>{row.paid?'Paga':'Pendente'}</span>{row.paidAt&&<small className="cell-subtitle">Pago em {dateLabel(row.paidAt)}</small>}</TableCell>{financeParties.map(party=><TableCell key={party}>{money(values[party]/VALUE_SCALE)}</TableCell>)}<TableCell><strong>{money(totalUnits(values)/VALUE_SCALE)}</strong></TableCell></TableRow>})}</TableBody></Table></details>)}</div>}</section>
+ </section>
+}
